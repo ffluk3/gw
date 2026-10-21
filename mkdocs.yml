@@ -42,6 +42,7 @@ nav:
       - Remove worktrees: how-to/clean-worktrees.md
       - Restore a branch: how-to/restore-a-branch.md
       - Script with JSON: how-to/script-with-json.md
+      - Use with agents: how-to/integrate-with-agents.md
   - Reference:
       - reference/index.md
       - Command line: reference/cli.md

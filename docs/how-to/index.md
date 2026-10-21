@@ -24,3 +24,4 @@ know the basics. They do not teach concepts; follow the links to
 ## Scripting
 
 - [Parse `gw` output in a script](script-with-json.md)
+- [Use `gw` in an agent workflow](integrate-with-agents.md)
