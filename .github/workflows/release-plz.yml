@@ -117,8 +117,11 @@ jobs:
             cargo build --release --target "$TARGET" -p gw
           fi
 
-      # Pick the tag for the gw package. release-plz can report more than one
-      # entry, and a entry without a tag means that package was not released.
+      # Pick the tag for the gw package. release-plz reports an entry for every
+      # package it considered, and it fills in a tag even for packages with
+      # `git_tag_enable = false` (gw-core), where no tag or release exists.
+      # Selecting the first non-null tag therefore points at a release that was
+      # never created. Select gw by name instead.
       - name: Resolve release tag
         id: tag
         env:
@@ -126,8 +129,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="$(printf '%s' "$RELEASES" \
-            | jq -r '[.[] | select(.tag != null)][0].tag // empty')"
-          [[ -n "$tag" ]] || { echo "no release tag found" >&2; exit 1; }
+            | jq -r '[.[] | select(.package_name == "gw" and .tag != null)][0].tag // empty')"
+          [[ -n "$tag" ]] || {
+            echo "no release tag found for package gw in: $RELEASES" >&2
+            exit 1
+          }
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
       - name: Package
