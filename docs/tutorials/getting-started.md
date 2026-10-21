@@ -8,10 +8,12 @@ a worktree for a branch. You do not need to know how worktrees work. You need
 
 You need:
 
-- A Rust toolchain at version 1.87.0 or newer. `rust-toolchain.toml` pins the
-  exact version, so `rustup` selects it for you.
 - `git` on your `PATH`.
 - A remote to clone. The examples use `git@github.com:acme/widgets.git`.
+
+To install the prebuilt release you also need `curl` and `tar`. To build from
+source you need a Rust toolchain at 1.87.0 or newer. `rust-toolchain.toml` pins
+the exact version, so `rustup` selects it for you.
 
 Optional tools are only needed for optional features:
 
@@ -20,34 +22,48 @@ Optional tools are only needed for optional features:
 
 ## Install
 
-1. Clone the `gw` repository and enter it:
+You can install a prebuilt release or build from source. Both write `gw` to
+`~/.local/bin`. If that directory is not on your `PATH`, the script prints a
+warning.
 
-   ```bash
-   git clone https://github.com/ffluk3/gw.git
-   cd gw
-   ```
+=== "Prebuilt release"
 
-2. Build and install the binary:
+    Install the latest release. This needs no Rust toolchain:
 
-   ```bash
-   ./install.sh
-   ```
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh | bash
+    ```
 
-   This writes `gw` to `~/.local/bin`. If that directory is not on your `PATH`,
-   the script prints a warning.
+    The installer downloads the archive for your platform, checks its SHA-256
+    sum, and installs the binary. To pin a version, pass `--version v1.2.3`:
 
-3. Add the shell integration. This step gives you `gwadd`, which opens a
-   worktree and changes into it:
+    ```bash
+    curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh \
+      | bash -s -- --version v1.2.3
+    ```
 
-   ```bash
-   echo 'source /path/to/gw/shell/gw.sh' >> ~/.zshrc
-   ```
+=== "From source"
 
-4. Start a new shell and confirm the install:
+    Clone the repository and build it with the pinned toolchain:
 
-   ```bash
-   gw --version
-   ```
+    ```bash
+    git clone https://github.com/ffluk3/gw.git
+    cd gw
+    ./install.sh --from-source
+    ```
+
+Then add the shell integration. This step gives you `gwadd`, which opens a
+worktree and changes into it:
+
+```bash
+echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
+```
+
+Start a new shell and confirm the install:
+
+```bash
+gw --version
+```
 
 ## Make your first layout
 

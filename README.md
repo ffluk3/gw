@@ -13,9 +13,8 @@ To change a branch, you change directory. You do not stash your work.
 
 ## Requirements
 
-- Rust 1.87.0 or newer. `rust-toolchain.toml` pins the exact version, so
-  `rustup` selects it for you.
 - `git` on your `PATH`.
+- A Rust toolchain at 1.87.0 or newer, **only if you build from source**.
 
 Optional, for optional features:
 
@@ -24,17 +23,25 @@ Optional, for optional features:
 
 ## Install
 
+Install the latest release. This needs `curl` and `tar`, not a Rust toolchain:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh | bash
+```
+
+Or install from source, which builds with the pinned toolchain:
+
 ```bash
 git clone https://github.com/ffluk3/gw.git
 cd gw
-./install.sh
+./install.sh --from-source
 ```
 
-This builds `gw` and installs it to `~/.local/bin`. Then add the shell
-integration, which provides `gwadd`:
+Either way `gw` lands in `~/.local/bin`. Then add the shell integration, which
+provides `gwadd`:
 
 ```bash
-echo 'source /path/to/gw/shell/gw.sh' >> ~/.zshrc
+echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
 ```
 
 Start a new shell and check the install:
@@ -42,6 +49,9 @@ Start a new shell and check the install:
 ```bash
 gw --version
 ```
+
+To pin a version, pass `--version v1.2.3`. To install somewhere else, pass
+`--dir DIR`.
 
 ## Quick start
 

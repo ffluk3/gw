@@ -56,9 +56,21 @@ commit triggers one.
    version, updates `CHANGELOG.md`, and adds the commits since the last tag.
 3. Merging that pull request tags the commit (`vX.Y.Z`) and creates a GitHub
    release.
+4. The `upload-binaries` job in the same workflow cross-compiles `gw` and
+   attaches one archive and one `.sha256` file for each supported platform:
 
-`gw` is installed from source, so nothing is published to crates.io.
-`release-plz.toml` sets `git_only = true` for that reason.
+   | Target | Runs on |
+   | --- | --- |
+   | `x86_64-unknown-linux-musl` | ubuntu |
+   | `aarch64-unknown-linux-musl` | ubuntu (via `cross`) |
+   | `x86_64-apple-darwin` | macOS |
+   | `aarch64-apple-darwin` | macOS |
+
+   `install.sh` downloads the archive for the running platform and verifies
+   the checksum before it installs the binary.
+
+`gw` is distributed through GitHub Releases, so nothing is published to
+crates.io. `release-plz.toml` sets `git_only = true` for that reason.
 
 ## Before you open a pull request
 
