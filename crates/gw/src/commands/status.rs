@@ -28,20 +28,20 @@ pub fn run(ctx: &Context, args: StatusArgs) -> Result<Outcome, Error> {
 
     let keys = snapshot::ticket_keys(&snap);
     let info = if keys.is_empty() {
-        Default::default()
+        crate::jira::TicketInfo::default()
     } else {
         match jira.lookup(&keys) {
             Ok(info) => info,
             Err(e) => {
                 eprintln!("warning: {e}");
-                Default::default()
+                crate::jira::TicketInfo::default()
             }
         }
     };
     snapshot::attach_tickets(&mut snap, &info);
 
     if ctx.is_json() {
-        print_json(ctx, &mut snap, &info)?;
+        print_json(&snap, &info);
         return Ok(Outcome::ok());
     }
 
@@ -49,11 +49,7 @@ pub fn run(ctx: &Context, args: StatusArgs) -> Result<Outcome, Error> {
     Ok(Outcome::ok())
 }
 
-fn print_json(
-    ctx: &Context,
-    snap: &mut gw_core::RepoSnapshot,
-    info: &crate::jira::TicketInfo,
-) -> Result<(), Error> {
+fn print_json(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
     #[derive(serde::Serialize)]
     struct Row {
         branch: String,
@@ -72,7 +68,7 @@ fn print_json(
         .iter()
         .filter(|wt| wt.kind != WorktreeKind::Main)
         .map(|wt| {
-            let ticket = wt.branch.as_ref().and_then(|b| b.ticket_key());
+            let ticket = wt.branch.as_ref().and_then(gw_core::BranchName::ticket_key);
             Row {
                 branch: display_branch(wt.branch.as_ref()),
                 path: display_path(&wt.path, &snap.layout.root),
@@ -94,8 +90,6 @@ fn print_json(
         serde_json::to_string_pretty(&serde_json::json!({ "worktrees": rows }))
             .unwrap_or_else(|_| "{}".into())
     );
-    let _ = ctx;
-    Ok(())
 }
 
 fn print_table(ctx: &Context, snap: &mut gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
@@ -139,7 +133,7 @@ fn print_table(ctx: &Context, snap: &mut gw_core::RepoSnapshot, info: &crate::ji
         let summary = wt
             .branch
             .as_ref()
-            .and_then(|b| b.ticket_key())
+            .and_then(gw_core::BranchName::ticket_key)
             .and_then(|k| info.summary.get(k.as_str()).cloned())
             .unwrap_or_default();
 

@@ -22,10 +22,12 @@ pub enum Dirty {
 }
 
 impl Dirty {
+    #[must_use]
     pub fn is_clean(self) -> bool {
         matches!(self, Dirty::Clean)
     }
 
+    #[must_use]
     pub fn as_str(self) -> &'static str {
         match self {
             Dirty::Clean => "clean",
@@ -69,6 +71,7 @@ pub struct Activity {
 }
 
 impl Activity {
+    #[must_use]
     pub fn unknown() -> Self {
         Self {
             age_secs: 0,
@@ -76,6 +79,7 @@ impl Activity {
         }
     }
 
+    #[must_use]
     pub fn is_older_than(&self, threshold_secs: i64) -> bool {
         self.source != ActivitySource::Unknown && self.age_secs >= threshold_secs
     }
@@ -94,6 +98,7 @@ pub enum TicketStatus {
 }
 
 impl TicketStatus {
+    #[must_use]
     pub fn closed_resolution(&self) -> Option<&str> {
         match self {
             TicketStatus::Closed { resolution } => {
@@ -121,6 +126,7 @@ pub struct WorktreeSnapshot {
 impl WorktreeSnapshot {
     /// A worktree is removable only when the facts needed to justify removal
     /// were all observed successfully.
+    #[must_use]
     pub fn status_observed(&self) -> bool {
         self.dirty != Dirty::Unknown
     }
@@ -146,20 +152,24 @@ pub struct ReachableSet {
 }
 
 impl ReachableSet {
+    #[must_use]
     pub fn new(mut commits: Vec<Sha>) -> Self {
         commits.sort_unstable();
         commits.dedup();
         Self { sorted: commits }
     }
 
+    #[must_use]
     pub fn contains(&self, sha: &Sha) -> bool {
         self.sorted.binary_search(sha).is_ok()
     }
 
+    #[must_use]
     pub fn len(&self) -> usize {
         self.sorted.len()
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.sorted.is_empty()
     }
@@ -184,6 +194,7 @@ pub struct RepoSnapshot {
 
 impl RepoSnapshot {
     /// Whether deleting this branch's ref is forbidden.
+    #[must_use]
     pub fn is_protected(&self, branch: &BranchName) -> bool {
         self.protected.contains(branch)
     }
@@ -194,10 +205,12 @@ impl RepoSnapshot {
     /// out in a worktree is protected from ref deletion, but only the default
     /// branch and the bare repo's own HEAD are protected from worktree removal.
     /// Conflating the two makes every worktree permanently unremovable.
+    #[must_use]
     pub fn is_worktree_protected(&self, branch: &BranchName) -> bool {
         self.default_branch.as_ref() == Some(branch) || self.head_branch.as_ref() == Some(branch)
     }
 
+    #[must_use]
     pub fn ticket_for(&self, branch: &BranchName) -> Option<TicketKey> {
         branch.ticket_key()
     }

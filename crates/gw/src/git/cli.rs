@@ -25,10 +25,10 @@ impl CliGit {
     }
 
     fn run(&self, args: &[&str]) -> Result<String, Error> {
-        self.run_in(&self.bare, args)
+        Self::run_in(&self.bare, args)
     }
 
-    fn run_in(&self, cwd: &Path, args: &[&str]) -> Result<String, Error> {
+    fn run_in(cwd: &Path, args: &[&str]) -> Result<String, Error> {
         let output = Command::new("git")
             .current_dir(cwd)
             .args(["-C", &cwd.to_string_lossy()])
@@ -49,7 +49,7 @@ impl CliGit {
     }
 
     /// Run a command and treat failure as an ordinary outcome.
-    fn run_optional(&self, cwd: &Path, args: &[&str]) -> Option<String> {
+    fn run_optional(cwd: &Path, args: &[&str]) -> Option<String> {
         let output = Command::new("git")
             .args(["-C", &cwd.to_string_lossy()])
             .args(args)
@@ -64,7 +64,7 @@ impl CliGit {
 
 impl GitBackend for CliGit {
     fn common_dir(&self, cwd: &Path) -> Result<PathBuf, Error> {
-        let out = self.run_in(
+        let out = Self::run_in(
             cwd,
             &["rev-parse", "--path-format=absolute", "--git-common-dir"],
         )?;
@@ -79,7 +79,7 @@ impl GitBackend for CliGit {
     fn status(&self, path: &Path) -> Result<Dirty, Error> {
         // A non-zero exit means the probe failed, not that the tree is clean.
         // Reporting `Unknown` makes the classifier fail closed.
-        match self.run_optional(path, &["status", "--porcelain"]) {
+        match Self::run_optional(path, &["status", "--porcelain"]) {
             Some(out) if out.trim().is_empty() => Ok(Dirty::Clean),
             Some(_) => Ok(Dirty::Dirty),
             None => Ok(Dirty::Unknown),
@@ -139,7 +139,7 @@ impl GitBackend for CliGit {
     }
 
     fn default_branch(&self) -> Result<Option<BranchName>, Error> {
-        let out = self.run_optional(
+        let out = Self::run_optional(
             &self.bare,
             &[
                 "symbolic-ref",
@@ -154,7 +154,7 @@ impl GitBackend for CliGit {
     }
 
     fn head_branch(&self) -> Result<Option<BranchName>, Error> {
-        let out = self.run_optional(&self.bare, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
+        let out = Self::run_optional(&self.bare, &["symbolic-ref", "--quiet", "--short", "HEAD"]);
         Ok(out.and_then(|s| BranchName::parse(s.trim()).ok()))
     }
 
@@ -239,15 +239,15 @@ impl GitBackend for CliGit {
     }
 
     fn remote_url(&self) -> Result<Option<String>, Error> {
-        Ok(self
-            .run_optional(&self.bare, &["remote", "get-url", "origin"])
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty()))
+        Ok(
+            Self::run_optional(&self.bare, &["remote", "get-url", "origin"])
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty()),
+        )
     }
 
     fn last_commit_epoch(&self, path: &Path) -> Result<Option<i64>, Error> {
-        Ok(self
-            .run_optional(path, &["log", "-1", "--format=%ct"])
+        Ok(Self::run_optional(path, &["log", "-1", "--format=%ct"])
             .and_then(|s| s.trim().parse::<i64>().ok()))
     }
 }

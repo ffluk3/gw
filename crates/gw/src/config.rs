@@ -35,16 +35,13 @@ pub fn resolve_layout(
         return Ok(Layout::new(cwd.to_path_buf()));
     }
 
-    let common = match git.common_dir(cwd) {
-        Ok(common) => common,
-        Err(_) => {
-            // Cases 1-2 failed and there is no `.bare` here: either an
-            // ancestor is a layout root, or this is not a repository at all.
-            if let Some(root) = find_ancestor_root(cwd) {
-                return Ok(Layout::new(root));
-            }
-            return Err(Error::Layout(not_a_repository(cwd)));
+    let Ok(common) = git.common_dir(cwd) else {
+        // Cases 1-2 failed and there is no `.bare` here: either an
+        // ancestor is a layout root, or this is not a repository at all.
+        if let Some(root) = find_ancestor_root(cwd) {
+            return Ok(Layout::new(root));
         }
+        return Err(Error::Layout(not_a_repository(cwd)));
     };
 
     // Case 4 covers a subdirectory of the root whose `.bare` is a sibling.
@@ -72,7 +69,7 @@ fn normalize_root(root: &Path) -> Result<PathBuf, Error> {
 fn find_ancestor_root(cwd: &Path) -> Option<PathBuf> {
     cwd.ancestors()
         .find(|dir| dir.join(".bare").join("HEAD").is_file())
-        .map(|dir| dir.to_path_buf())
+        .map(std::path::Path::to_path_buf)
 }
 
 fn not_a_repository(cwd: &Path) -> String {
@@ -143,9 +140,11 @@ pub fn display_path(path: &Path, root: &Path) -> String {
 }
 
 pub fn now_epoch() -> i64 {
+    // Saturate rather than wrap: a clock past year 292 billion is not a
+    // realistic case, and a negative epoch would invert every age comparison.
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
+        .map(|d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
         .unwrap_or(0)
 }
 

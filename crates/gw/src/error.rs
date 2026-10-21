@@ -21,8 +21,7 @@ pub enum Error {
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Error::Usage(msg) => write!(f, "{msg}"),
-            Error::Layout(msg) => write!(f, "{msg}"),
+            Error::Usage(msg) | Error::Layout(msg) | Error::Other(msg) => write!(f, "{msg}"),
             Error::Git { context, stderr } => {
                 if stderr.trim().is_empty() {
                     write!(f, "{context}")
@@ -31,7 +30,6 @@ impl fmt::Display for Error {
                 }
             }
             Error::Lookup { service, detail } => write!(f, "{service}: {detail}"),
-            Error::Other(msg) => write!(f, "{msg}"),
         }
     }
 }

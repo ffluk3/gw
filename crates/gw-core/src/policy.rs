@@ -28,6 +28,7 @@ impl Default for Policy {
 }
 
 impl Policy {
+    #[must_use]
     pub fn with_stale_days(mut self, days: i64) -> Self {
         self.stale_after_secs = days.saturating_mul(86_400);
         self

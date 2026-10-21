@@ -33,10 +33,12 @@ impl Sha {
         Ok(Sha(trimmed.to_ascii_lowercase()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
+    #[must_use]
     pub fn short(&self, width: usize) -> &str {
         &self.0[..width.min(self.0.len())]
     }
@@ -70,7 +72,11 @@ impl BranchName {
         if candidate.contains("..") || candidate.contains("//") {
             return Err(ModelError("branch name contains an invalid ref sequence"));
         }
-        if candidate.ends_with('/') || candidate.ends_with(".lock") || candidate.ends_with('.') {
+        // Git reserves `.lock` case-insensitively, so reject `x.LOCK` too.
+        // `lower` is already lowercase, so the comparison is exact.
+        #[allow(clippy::case_sensitive_file_extension_comparisons)]
+        let has_lock_suffix = candidate.to_ascii_lowercase().ends_with(".lock");
+        if candidate.ends_with('/') || has_lock_suffix || candidate.ends_with('.') {
             return Err(ModelError("branch name has an invalid suffix"));
         }
         let forbidden = |c: char| {
@@ -99,12 +105,14 @@ impl BranchName {
         Ok(BranchName(candidate.to_string()))
     }
 
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
 
     /// Extracts the first JIRA-shaped key (`[A-Z][A-Z0-9]+-[0-9]+`) from the
     /// branch name. Handles prefixed branches such as `feature/AX-123-thing`.
+    #[must_use]
     pub fn ticket_key(&self) -> Option<TicketKey> {
         let bytes = self.0.as_bytes();
         let mut i = 0;
@@ -147,6 +155,7 @@ impl fmt::Display for BranchName {
 pub struct TicketKey(String);
 
 impl TicketKey {
+    #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -209,7 +218,11 @@ mod tests {
         ];
         for (input, expected) in cases {
             let got = BranchName::parse(input).unwrap().ticket_key();
-            assert_eq!(got.as_ref().map(|k| k.as_str()), expected, "input={input}");
+            assert_eq!(
+                got.as_ref().map(super::TicketKey::as_str),
+                expected,
+                "input={input}"
+            );
         }
     }
 

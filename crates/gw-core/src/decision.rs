@@ -18,6 +18,7 @@ pub enum Target {
 }
 
 impl Target {
+    #[must_use]
     pub fn branch_name(&self) -> Option<&BranchName> {
         match self {
             Target::Worktree { branch, .. } => branch.as_ref(),
@@ -25,6 +26,7 @@ impl Target {
         }
     }
 
+    #[must_use]
     pub fn path(&self) -> Option<&PathBuf> {
         match self {
             Target::Worktree { path, .. } => Some(path),
@@ -89,6 +91,7 @@ pub enum Decision {
 }
 
 impl Decision {
+    #[must_use]
     pub fn reason(&self) -> &Reason {
         match self {
             Decision::Remove { reason }
@@ -100,10 +103,12 @@ impl Decision {
         }
     }
 
+    #[must_use]
     pub fn is_destructive(&self) -> bool {
         matches!(self, Decision::Remove { .. } | Decision::Delete { .. })
     }
 
+    #[must_use]
     pub fn is_recommendation(&self) -> bool {
         matches!(self, Decision::Recommend { .. })
     }
@@ -127,6 +132,7 @@ pub struct Counts {
 }
 
 impl Plan {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             entries: Vec::new(),
@@ -141,6 +147,7 @@ impl Plan {
         self.entries.iter().filter(|(_, d)| d.is_destructive())
     }
 
+    #[must_use]
     pub fn counts(&self) -> Counts {
         let mut counts = Counts::default();
         for (_, d) in &self.entries {
@@ -156,6 +163,7 @@ impl Plan {
         counts
     }
 
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }

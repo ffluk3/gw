@@ -29,6 +29,7 @@ pub enum Verdict<'a> {
 /// Order is deliberate: anything that protects work (harness ownership,
 /// protection list, unpublished commits, uncommitted changes, unreadable
 /// state) is tested before any reason to destroy it.
+#[must_use]
 pub fn verdict<'a>(
     wt: &'a WorktreeSnapshot,
     snap: &RepoSnapshot,
@@ -79,6 +80,7 @@ pub fn verdict<'a>(
     Verdict::NoSignal
 }
 
+#[must_use]
 pub fn decide(verdict: Verdict<'_>, policy: &Policy) -> Decision {
     match verdict {
         Verdict::Harness => Decision::Skip {

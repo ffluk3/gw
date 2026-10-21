@@ -12,6 +12,7 @@ use super::verdict::{decide, verdict};
 /// This is the only function that decides what gets destroyed. `gw clean
 /// --dry-run` prints this plan and `gw clean` executes it; the executor never
 /// re-derives a decision.
+#[must_use]
 pub fn classify_clean(snap: &RepoSnapshot, policy: &Policy) -> Plan {
     let mut plan = Plan::new();
 
@@ -98,6 +99,7 @@ fn classify_orphan(
 }
 
 /// Convenience for callers that only care about worktrees with a real branch.
+#[must_use]
 pub fn removable_worktree_paths(plan: &Plan) -> Vec<PathBuf> {
     plan.destructive()
         .filter_map(|(t, _)| match t {
@@ -107,6 +109,7 @@ pub fn removable_worktree_paths(plan: &Plan) -> Vec<PathBuf> {
         .collect()
 }
 
+#[must_use]
 pub fn branches_to_delete(plan: &Plan) -> Vec<(BranchName, crate::model::Sha)> {
     plan.destructive()
         .filter_map(|(t, d)| match (t, d) {

@@ -56,36 +56,33 @@ pub fn parse_worktree_list(input: &str) -> Vec<WorktreeEntry> {
             None => (key_line, ""),
         };
 
-        match key {
-            "worktree" => {
-                if let Some(entry) = current.take() {
-                    entries.push(entry);
-                }
-                current = Some(WorktreeEntry {
-                    path: expand_home(value),
-                    head: None,
-                    branch: None,
-                    bare: false,
-                    detached: false,
-                    prunable: false,
-                });
+        if key == "worktree" {
+            if let Some(entry) = current.take() {
+                entries.push(entry);
             }
-            _ => {
-                let Some(entry) = current.as_mut() else {
-                    continue;
-                };
-                match key {
-                    "HEAD" => entry.head = Sha::parse(value).ok(),
-                    "branch" => {
-                        entry.branch = value
-                            .strip_prefix("refs/heads/")
-                            .and_then(|name| BranchName::parse(name).ok());
-                    }
-                    "bare" => entry.bare = true,
-                    "detached" => entry.detached = true,
-                    "prunable" => entry.prunable = true,
-                    _ => {}
+            current = Some(WorktreeEntry {
+                path: expand_home(value),
+                head: None,
+                branch: None,
+                bare: false,
+                detached: false,
+                prunable: false,
+            });
+        } else {
+            let Some(entry) = current.as_mut() else {
+                continue;
+            };
+            match key {
+                "HEAD" => entry.head = Sha::parse(value).ok(),
+                "branch" => {
+                    entry.branch = value
+                        .strip_prefix("refs/heads/")
+                        .and_then(|name| BranchName::parse(name).ok());
                 }
+                "bare" => entry.bare = true,
+                "detached" => entry.detached = true,
+                "prunable" => entry.prunable = true,
+                _ => {}
             }
         }
     }

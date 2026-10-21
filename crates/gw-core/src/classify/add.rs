@@ -20,16 +20,21 @@ pub enum AddStrategy {
 /// Replaces the four-arm ladder in `gwadd.sh`, and unlike the shell version
 /// there is no `|| true` swallowing a failed fast-forward: the strategy is a
 /// decision, and the adapter reports failure to apply it.
+#[must_use]
 pub fn add_strategy(existing: Option<PathBuf>, has_local: bool, has_remote: bool) -> AddStrategy {
     if let Some(path) = existing {
         return AddStrategy::UseExisting { path };
     }
-    match (has_local, has_remote) {
-        (true, true) => AddStrategy::FastForwardThenUse,
-        (true, false) => AddStrategy::FastForwardThenUse,
-        (false, true) => AddStrategy::TrackRemote,
-        (false, false) => AddStrategy::CreateNew,
+    // A local branch means a checkout is possible either way. Whether a remote
+    // ref also exists only affects whether `origin/<branch>` is available as a
+    // fetch point, which the adapter handles when it applies the strategy.
+    if has_local {
+        return AddStrategy::FastForwardThenUse;
     }
+    if has_remote {
+        return AddStrategy::TrackRemote;
+    }
+    AddStrategy::CreateNew
 }
 
 /// Validate a branch name is usable as a worktree directory.

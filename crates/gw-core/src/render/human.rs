@@ -3,6 +3,7 @@ use crate::decision::Reason;
 /// Format a duration in the same units the shell implementation used:
 /// minutes, hours, days, weeks, months — always rounded down and suffixed
 /// with "ago".
+#[must_use]
 pub fn short_age(age_secs: i64) -> String {
     let age = age_secs.max(0);
     if age < 3_600 {
@@ -19,6 +20,7 @@ pub fn short_age(age_secs: i64) -> String {
 }
 
 /// A single-line human description of why a decision was reached.
+#[must_use]
 pub fn describe_reason(reason: &Reason) -> String {
     match reason {
         Reason::Protected => "protected branch".into(),
@@ -40,6 +42,7 @@ pub fn describe_reason(reason: &Reason) -> String {
 }
 
 /// The glyph shown in the status column.
+#[must_use]
 pub fn glyph(reason: &Reason) -> &'static str {
     match reason {
         Reason::Prunable
@@ -56,6 +59,7 @@ pub fn glyph(reason: &Reason) -> &'static str {
 }
 
 /// The restore hint printed after a branch deletion.
+#[must_use]
 pub fn restore_hint(branch: &str, sha: &str) -> String {
     format!("git branch {branch} {sha}")
 }

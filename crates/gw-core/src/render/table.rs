@@ -6,6 +6,7 @@ use crate::render::human::describe_reason;
 /// The shell implementation piped tab-separated rows through `column -t`, so
 /// emoji and wide characters misaligned. Here widths are computed on display
 /// columns, where East Asian wide characters count as two.
+#[must_use]
 pub fn render_table(plan: &Plan) -> String {
     if plan.is_empty() {
         return "(no worktrees)\n".to_string();
@@ -24,8 +25,7 @@ pub fn render_table(plan: &Plan) -> String {
             Target::Worktree { path, branch } => (
                 branch
                     .as_ref()
-                    .map(|b| b.as_str().to_string())
-                    .unwrap_or_else(|| "(detached)".into()),
+                    .map_or_else(|| "(detached)".into(), |b| b.as_str().to_string()),
                 path.display().to_string(),
             ),
             Target::Branch { name } => (name.as_str().to_string(), "—".to_string()),
@@ -68,6 +68,7 @@ pub fn render_table(plan: &Plan) -> String {
 }
 
 /// Render a single status line, used by `gw status`.
+#[must_use]
 pub fn render_status_row(
     branch: &str,
     age: &str,
@@ -85,6 +86,7 @@ pub fn render_status_row(
 
 /// Number of terminal columns a string occupies, counting East Asian wide and
 /// fullwidth characters as two and zero-width joiners/emoji modifiers as zero.
+#[must_use]
 pub fn display_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthChar;
     s.chars()

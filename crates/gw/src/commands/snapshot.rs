@@ -155,7 +155,7 @@ pub fn ticket_keys(snapshot: &RepoSnapshot) -> Vec<gw_core::TicketKey> {
     let mut keys: Vec<_> = snapshot
         .worktrees
         .iter()
-        .filter_map(|wt| wt.branch.as_ref().and_then(|b| b.ticket_key()))
+        .filter_map(|wt| wt.branch.as_ref().and_then(gw_core::BranchName::ticket_key))
         .collect();
     keys.sort();
     keys.dedup();

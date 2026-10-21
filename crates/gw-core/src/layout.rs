@@ -21,6 +21,7 @@ pub struct Layout {
 }
 
 impl Layout {
+    #[must_use]
     pub fn new(root: PathBuf) -> Self {
         let worktrees = detect_worktrees_dir(&root);
         let bare = root.join(".bare");
@@ -32,12 +33,14 @@ impl Layout {
     }
 
     /// Same layout with an explicitly known worktrees directory.
+    #[must_use]
     pub fn with_worktrees(self, worktrees: PathBuf) -> Self {
         Self { worktrees, ..self }
     }
 
     /// Derive a layout from the common git directory reported by git itself:
     /// `<root>/.bare` implies `<root>` is the repo root.
+    #[must_use]
     pub fn from_common_dir(common: &Path) -> Option<Self> {
         if common.file_name()?.to_str()? != ".bare" {
             return None;
@@ -51,12 +54,14 @@ impl Layout {
     /// Branch names keep their slashes, so `feature/x` maps to
     /// `worktrees/feature/x`. This preserves compatibility with existing
     /// checkouts created by the shell implementation.
+    #[must_use]
     pub fn worktree_path(&self, branch: &BranchName) -> PathBuf {
         self.worktrees.join(branch.as_str())
     }
 
     /// Whether a path belongs to Claude's ephemeral agent worktrees, which the
     /// harness owns and gw must never touch.
+    #[must_use]
     pub fn is_harness_worktree(path: &Path) -> bool {
         let text = path.to_string_lossy();
         text.contains("/.claude/worktrees/")

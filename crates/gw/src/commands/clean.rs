@@ -67,7 +67,7 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         return Ok(Outcome::ok());
     }
 
-    let outcome = execute(ctx, &plan)?;
+    let outcome = execute(ctx, &plan);
     if !ctx.is_json() {
         println!();
         println!("🌳 Pruning worktree metadata...");
@@ -168,8 +168,7 @@ fn print_recommendations(plan: &Plan) {
         let name = match target {
             Target::Worktree { branch, path } => branch
                 .as_ref()
-                .map(|b| b.as_str().to_string())
-                .unwrap_or_else(|| path.display().to_string()),
+                .map_or_else(|| path.display().to_string(), |b| b.as_str().to_string()),
             Target::Branch { name } => name.as_str().to_string(),
         };
         println!(
@@ -180,7 +179,7 @@ fn print_recommendations(plan: &Plan) {
 }
 
 /// Apply a plan. Never re-derives a decision.
-fn execute(ctx: &Context, plan: &Plan) -> Result<Outcome, Error> {
+fn execute(ctx: &Context, plan: &Plan) -> Outcome {
     let mut succeeded = 0;
     let mut failed = 0;
     let mut deleted: Vec<(String, String)> = Vec::new();
@@ -200,10 +199,10 @@ fn execute(ctx: &Context, plan: &Plan) -> Result<Outcome, Error> {
                         succeeded += 1;
                         println!(
                             "🗑️  removed {} ({})",
-                            branch
-                                .as_ref()
-                                .map(|b| b.as_str().to_string())
-                                .unwrap_or_else(|| path.display().to_string()),
+                            branch.as_ref().map_or_else(
+                                || path.display().to_string(),
+                                |b| b.as_str().to_string()
+                            ),
                             gw_core::render::human::describe_reason(decision.reason())
                         );
                     }
@@ -239,11 +238,11 @@ fn execute(ctx: &Context, plan: &Plan) -> Result<Outcome, Error> {
     }
 
     if failed > 0 {
-        return Ok(if succeeded > 0 {
+        return if succeeded > 0 {
             Outcome::partial()
         } else {
             Outcome { code: 1 }
-        });
+        };
     }
-    Ok(Outcome::ok())
+    Outcome::ok()
 }

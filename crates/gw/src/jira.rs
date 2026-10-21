@@ -122,7 +122,7 @@ impl JiraBackend for JiraRest {
         let jql = format!(
             "key in ({})",
             keys.iter()
-                .map(|k| k.as_str())
+                .map(gw_core::TicketKey::as_str)
                 .collect::<Vec<_>>()
                 .join(",")
         );

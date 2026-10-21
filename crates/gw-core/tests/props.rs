@@ -25,7 +25,9 @@ impl Rng {
     }
 
     fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
-        &items[(self.next() % items.len() as u64) as usize]
+        let index = usize::try_from(self.next().rem_euclid(items.len() as u64))
+            .expect("index is bounded by the slice length");
+        &items[index]
     }
 
     fn bool(&mut self) -> bool {
@@ -65,7 +67,7 @@ fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
         } else {
             Some(rng.pick(&unpublished).clone())
         };
-        let age_days = (rng.next() % 30) as i64;
+        let age_days = i64::try_from(rng.next() % 30).expect("0..30 fits in i64");
         worktrees.push(WorktreeSnapshot {
             path: PathBuf::from(format!("/repo/worktrees/AX-{i}")),
             branch: Some(branch),
@@ -105,7 +107,7 @@ fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
             } else {
                 rng.pick(&unpublished).clone()
             }),
-            commit_age_secs: Some((rng.next() % 30) as i64 * day),
+            commit_age_secs: Some(i64::try_from(rng.next() % 30).expect("0..30 fits in i64") * day),
         });
     }
 
@@ -168,7 +170,7 @@ fn never_removes_a_dirty_or_unreadable_worktree() {
     for seed in 0..200 {
         for pi in 0..5 {
             let (snap, plan) = run(seed, DAY, pi);
-            for (target, decision) in plan.entries.iter() {
+            for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
                     continue;
                 }
@@ -195,7 +197,7 @@ fn never_removes_unpublished_commits() {
     for seed in 0..200 {
         for pi in 0..5 {
             let (snap, plan) = run(seed, DAY, pi);
-            for (target, decision) in plan.entries.iter() {
+            for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
                     continue;
                 }
@@ -222,7 +224,7 @@ fn never_removes_a_protected_branch() {
     for seed in 0..200 {
         for pi in 0..5 {
             let (snap, plan) = run(seed, DAY, pi);
-            for (target, decision) in plan.entries.iter() {
+            for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
                     continue;
                 }
@@ -241,7 +243,7 @@ fn never_touches_the_harness_worktrees() {
     for seed in 0..200 {
         for pi in 0..5 {
             let (snap, plan) = run(seed, DAY, pi);
-            for (target, decision) in plan.entries.iter() {
+            for (target, decision) in &plan.entries {
                 if !decision.is_destructive() {
                     continue;
                 }
@@ -265,11 +267,11 @@ fn never_deletes_branches_unless_enabled() {
         delete_branches: false,
         ..Policy::default()
     };
-    for seed in 0..200 {
-        let mut rng = Rng((seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    for seed in 0u64..200 {
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let (snap, _) = snapshot(&mut rng, DAY);
         let plan = classify_clean(&snap, &no_delete);
-        for (_, decision) in plan.entries.iter() {
+        for (_, decision) in &plan.entries {
             assert!(
                 !matches!(decision, Decision::Delete { .. }),
                 "seed={seed} deleted a branch with delete_branches disabled"
@@ -283,7 +285,7 @@ fn never_deletes_a_protected_or_unpublished_branch() {
     for seed in 0..200 {
         for pi in 0..5 {
             let (snap, plan) = run(seed, DAY, pi);
-            for (target, decision) in plan.entries.iter() {
+            for (target, decision) in &plan.entries {
                 let Decision::Delete { tip, .. } = decision else {
                     continue;
                 };
@@ -314,11 +316,11 @@ fn classification_is_deterministic() {
 
 #[test]
 fn closed_tickets_are_only_removed_when_opted_in() {
-    for seed in 0..200 {
-        let mut rng = Rng((seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    for seed in 0u64..200 {
+        let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
         let (snap, _) = snapshot(&mut rng, DAY);
         let plan = classify_clean(&snap, &Policy::default());
-        for (target, decision) in plan.entries.iter() {
+        for (target, decision) in &plan.entries {
             let Target::Worktree { path, .. } = target else {
                 continue;
             };

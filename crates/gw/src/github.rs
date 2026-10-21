@@ -22,7 +22,7 @@ pub trait GithubBackend {
 pub struct GhCli;
 
 impl GhCli {
-    fn query_chunk(&self, repo: &str, chunk: &[BranchName]) -> Result<Vec<String>, Error> {
+    fn query_chunk(repo: &str, chunk: &[BranchName]) -> Result<Vec<String>, Error> {
         // `search` takes a single query argument, so the repo filter travels
         // inside the search string; branch names stay typed variables.
         let mut args: Vec<String> = vec![
@@ -45,8 +45,7 @@ impl GhCli {
             .map_err(|e| Error::Lookup {
                 service: "github",
                 detail: format!(
-                    "could not run `gh` ({}). Install the GitHub CLI and run `gh auth login`.",
-                    e
+                    "could not run `gh` ({e}). Install the GitHub CLI and run `gh auth login`."
                 ),
             })?;
 
@@ -70,7 +69,7 @@ impl GhCli {
                 .get("data")
                 .and_then(|d| d.get(format!("b{i}")))
                 .and_then(|v| v.get("issueCount"))
-                .and_then(|v| v.as_u64())
+                .and_then(serde_json::Value::as_u64)
                 .unwrap_or(0);
             if count > 0 {
                 merged.push(branch.as_str().to_string());
@@ -102,7 +101,7 @@ impl GithubBackend for GhCli {
     fn merged_prs(&self, repo: &str, branches: &[BranchName]) -> Result<HashSet<String>, Error> {
         let mut merged = HashSet::new();
         for chunk in branches.chunks(BATCH) {
-            for name in self.query_chunk(repo, chunk)? {
+            for name in Self::query_chunk(repo, chunk)? {
                 merged.insert(name);
             }
         }

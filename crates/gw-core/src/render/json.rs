@@ -22,6 +22,7 @@ pub struct JsonEntry<'a> {
     pub description: String,
 }
 
+#[must_use]
 pub fn to_json(plan: &Plan) -> JsonPlan<'_> {
     JsonPlan {
         entries: plan
@@ -37,14 +38,14 @@ pub fn to_json(plan: &Plan) -> JsonPlan<'_> {
     }
 }
 
+#[must_use]
 pub fn to_json_string(plan: &Plan) -> String {
     serde_json::to_string_pretty(&to_json(plan))
-        .unwrap_or_else(|e| format!("{{\"error\":\"{}\"}}", e))
+        .unwrap_or_else(|e| format!("{{\"error\":\"{e}\"}}"))
 }
 
 /// A branch name for display, collapsing the detached state.
+#[must_use]
 pub fn display_branch(branch: Option<&BranchName>) -> String {
-    branch
-        .map(|b| b.as_str().to_string())
-        .unwrap_or_else(|| "(detached)".to_string())
+    branch.map_or_else(|| "(detached)".to_string(), |b| b.as_str().to_string())
 }
