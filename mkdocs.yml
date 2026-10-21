@@ -1,0 +1,69 @@
+site_name: gw
+site_description: Manage git worktrees in a bare-repo layout
+site_url: https://ffluk3.github.io/gw/
+repo_url: https://github.com/ffluk3/gw
+repo_name: ffluk3/gw
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - tutorials/index.md
+      - Get started: tutorials/getting-started.md
+  - How-to:
+      - how-to/index.md
+      - Create a layout: how-to/create-a-layout.md
+      - Manage the repos root: how-to/manage-repos-root.md
+      - Run from anywhere: how-to/run-from-anywhere.md
+      - Open or reuse a worktree: how-to/add-worktree.md
+      - Read the status table: how-to/read-status.md
+      - Use JIRA: how-to/configure-jira.md
+      - Remove worktrees: how-to/clean-worktrees.md
+      - Restore a branch: how-to/restore-a-branch.md
+      - Script with JSON: how-to/script-with-json.md
+  - Reference:
+      - reference/index.md
+      - Command line: reference/cli.md
+      - Configuration: reference/configuration.md
+      - Layout on disk: reference/layout.md
+      - Exit codes: reference/exit-codes.md
+      - JSON output: reference/json.md
+  - Explanation:
+      - explanation/index.md
+      - Why a worktree layout: explanation/why-worktree-layout.md
+      - Layout and discovery: explanation/layout.md
+      - Clean safety rules: explanation/clean-safety.md
+      - Decision model: explanation/decision-model.md
+      - Architecture: explanation/architecture.md
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+
+strict: true
