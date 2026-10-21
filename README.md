@@ -82,6 +82,7 @@ Full documentation lives in [`docs/`](docs/index.md) and is organized by the
 | Do a specific task | [How-to guides](docs/how-to/index.md) |
 | Look up a flag or setting | [Reference](docs/reference/index.md) |
 | Understand the design | [Explanation](docs/explanation/index.md) |
+| Use `gw` from an AI agent | [Agent skill](skills/gw/SKILL.md) |
 
 The docs are a MkDocs site. To preview them locally:
 
