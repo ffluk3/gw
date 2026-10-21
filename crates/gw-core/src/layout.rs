@@ -6,7 +6,7 @@ use crate::model::BranchName;
 
 /// Where a bare repo and its worktrees live.
 ///
-/// Mirrors the on-disk convention established by `worktree_setup.sh`:
+/// The on-disk convention:
 ///
 /// ```text
 /// <root>/
@@ -112,7 +112,7 @@ mod tests {
             "/repo/.bare/.claude/worktrees/agent-abc"
         )));
         assert!(!Layout::is_harness_worktree(Path::new(
-            "/repo/worktrees/AX-1"
+            "/repo/worktrees/PROJ-1"
         )));
     }
 }

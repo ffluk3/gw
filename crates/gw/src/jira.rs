@@ -30,10 +30,14 @@ pub struct JiraRest {
 }
 
 impl JiraRest {
-    /// Build an adapter from the environment, or `None` when JIRA is not
+    /// Build an adapter from the resolved settings, or `None` when JIRA is not
     /// configured. Callers treat absence as "lookup disabled", never an error.
-    pub fn from_env() -> Option<Self> {
-        let base_url = std::env::var("GW_JIRA_BASE_URL").ok()?;
+    ///
+    /// The base URL comes from `--jira-url`, `GW_JIRA_BASE_URL`, or `.gw.toml`.
+    /// Credentials come from the environment only, so they are never written to
+    /// a file that might be committed.
+    pub fn from_settings(settings: &crate::settings::Settings) -> Option<Self> {
+        let base_url = settings.jira_base_url.clone()?;
         let user = std::env::var("GW_JIRA_USER")
             .or_else(|_| std::env::var("JIRA_USER"))
             .ok()?;

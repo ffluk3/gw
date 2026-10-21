@@ -20,13 +20,13 @@ pub fn run(ctx: &Context, args: StatusArgs) -> Result<Outcome, Error> {
     let jira: Box<dyn JiraBackend> = if args.no_jira {
         Box::new(NoJira)
     } else {
-        match JiraRest::from_env() {
+        match JiraRest::from_settings(&ctx.settings) {
             Some(j) => Box::new(j),
             None => Box::new(NoJira),
         }
     };
 
-    let keys = snapshot::ticket_keys(&snap);
+    let keys = snapshot::ticket_keys(&snap, &ctx.settings.jira_projects);
     let info = if keys.is_empty() {
         crate::jira::TicketInfo::default()
     } else {
@@ -38,18 +38,18 @@ pub fn run(ctx: &Context, args: StatusArgs) -> Result<Outcome, Error> {
             }
         }
     };
-    snapshot::attach_tickets(&mut snap, &info);
+    snapshot::attach_tickets(&mut snap, &info, &ctx.settings.jira_projects);
 
     if ctx.is_json() {
-        print_json(&snap, &info);
+        print_json(&snap, &info, &ctx.settings.jira_projects);
         return Ok(Outcome::ok());
     }
 
-    print_table(ctx, &mut snap, &info);
+    print_table(&snap, &info, &ctx.settings.jira_projects);
     Ok(Outcome::ok())
 }
 
-fn print_json(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
+fn print_json(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo, projects: &[String]) {
     #[derive(serde::Serialize)]
     struct Row {
         branch: String,
@@ -68,7 +68,10 @@ fn print_json(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
         .iter()
         .filter(|wt| wt.kind != WorktreeKind::Main)
         .map(|wt| {
-            let ticket = wt.branch.as_ref().and_then(gw_core::BranchName::ticket_key);
+            let ticket = wt
+                .branch
+                .as_ref()
+                .and_then(|branch| branch.ticket_key_for(projects));
             Row {
                 branch: display_branch(wt.branch.as_ref()),
                 path: display_path(&wt.path, &snap.layout.root),
@@ -92,7 +95,7 @@ fn print_json(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
     );
 }
 
-fn print_table(ctx: &Context, snap: &mut gw_core::RepoSnapshot, info: &crate::jira::TicketInfo) {
+fn print_table(snap: &gw_core::RepoSnapshot, info: &crate::jira::TicketInfo, projects: &[String]) {
     let mut rows: Vec<[String; 5]> = Vec::new();
     rows.push([
         "BRANCH".into(),
@@ -133,7 +136,7 @@ fn print_table(ctx: &Context, snap: &mut gw_core::RepoSnapshot, info: &crate::ji
         let summary = wt
             .branch
             .as_ref()
-            .and_then(gw_core::BranchName::ticket_key)
+            .and_then(|branch| branch.ticket_key_for(projects))
             .and_then(|k| info.summary.get(k.as_str()).cloned())
             .unwrap_or_default();
 
@@ -145,34 +148,10 @@ fn print_table(ctx: &Context, snap: &mut gw_core::RepoSnapshot, info: &crate::ji
         return;
     }
 
-    println!("{}", layout_rows(&rows, ctx.no_color));
+    println!("{}", crate::output::layout_rows(&rows));
 
     if dirty_count > 0 {
         println!();
         println!("● = uncommitted changes");
     }
-}
-
-/// Aligned rendering shared by status output.
-fn layout_rows(rows: &[[String; 5]], _no_color: bool) -> String {
-    let mut widths = [0usize; 5];
-    for row in rows {
-        for (i, cell) in row.iter().enumerate() {
-            widths[i] = widths[i].max(gw_core::render::table::display_width(cell));
-        }
-    }
-    let mut out = String::new();
-    for row in rows {
-        let mut line = String::new();
-        for (i, cell) in row.iter().enumerate() {
-            line.push_str(cell);
-            if i + 1 < row.len() {
-                let pad = widths[i].saturating_sub(gw_core::render::table::display_width(cell)) + 2;
-                line.push_str(&" ".repeat(pad));
-            }
-        }
-        out.push_str(line.trim_end());
-        out.push('\n');
-    }
-    out
 }

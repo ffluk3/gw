@@ -111,9 +111,32 @@ impl BranchName {
     }
 
     /// Extracts the first JIRA-shaped key (`[A-Z][A-Z0-9]+-[0-9]+`) from the
-    /// branch name. Handles prefixed branches such as `feature/AX-123-thing`.
+    /// branch name. Handles prefixed branches such as `feature/PROJ-123-thing`.
     #[must_use]
     pub fn ticket_key(&self) -> Option<TicketKey> {
+        self.find_ticket(|_| true)
+    }
+
+    /// Extracts the first key whose project prefix is in `projects`.
+    ///
+    /// An empty list means "any project", which is the same as
+    /// [`Self::ticket_key`]. Matching is case-insensitive because JIRA renders
+    /// project keys in upper case but users type them in either case.
+    #[must_use]
+    pub fn ticket_key_for(&self, projects: &[String]) -> Option<TicketKey> {
+        if projects.is_empty() {
+            return self.ticket_key();
+        }
+        self.find_ticket(|key| {
+            let prefix = key.split_once('-').map_or(key, |(prefix, _)| prefix);
+            projects.iter().any(|p| p.eq_ignore_ascii_case(prefix))
+        })
+    }
+
+    /// The shared scanner. `accept` decides whether a well-shaped candidate is
+    /// the key we want; a rejected candidate is skipped without rescanning its
+    /// interior, so `XPROJ-1` can never satisfy a filter for `PROJ`.
+    fn find_ticket(&self, accept: impl Fn(&str) -> bool) -> Option<TicketKey> {
         let bytes = self.0.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
@@ -134,7 +157,12 @@ impl BranchName {
                     k += 1;
                 }
                 if k > digit_start {
-                    return Some(TicketKey(self.0[start..k].to_string()));
+                    let candidate = &self.0[start..k];
+                    if accept(candidate) {
+                        return Some(TicketKey(candidate.to_string()));
+                    }
+                    i = k.max(i + 1);
+                    continue;
                 }
             }
             i = j.max(i + 1);
@@ -149,7 +177,7 @@ impl fmt::Display for BranchName {
     }
 }
 
-/// A JIRA issue key such as `AX-47383`.
+/// A JIRA issue key such as `PROJ-47383`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
 pub struct TicketKey(String);
@@ -196,7 +224,7 @@ mod tests {
     #[test]
     fn branch_accepts_real_shapes() {
         for name in [
-            "AX-47383",
+            "PROJ-47383",
             "feature/nodejs-20-migration",
             "agents/right-now-when-i-run-asdf-ensure-versions",
             "family/platform/1.408",
@@ -209,8 +237,8 @@ mod tests {
     #[test]
     fn ticket_key_extraction() {
         let cases = [
-            ("AX-47383", Some("AX-47383")),
-            ("feature/AX-123-thing", Some("AX-123")),
+            ("PROJ-47383", Some("PROJ-47383")),
+            ("feature/PROJ-123-thing", Some("PROJ-123")),
             ("agents/right-now-when", None),
             ("family/platform/1.408", None),
             ("ABC123-9-x", Some("ABC123-9")),
@@ -227,8 +255,40 @@ mod tests {
     }
 
     #[test]
+    fn ticket_key_for_filters_by_project() {
+        let branch = BranchName::parse("feature/OTHER-7-PROJ-123").unwrap();
+        let proj = vec!["PROJ".to_string()];
+        assert_eq!(
+            branch.ticket_key_for(&proj).as_ref().map(TicketKey::as_str),
+            Some("PROJ-123")
+        );
+        // Empty means unrestricted, preserving the no-config behavior.
+        assert_eq!(
+            branch.ticket_key_for(&[]).as_ref().map(TicketKey::as_str),
+            Some("OTHER-7")
+        );
+    }
+
+    #[test]
+    fn ticket_key_for_is_case_insensitive_and_multi_project() {
+        let branch = BranchName::parse("PROJ-5").unwrap();
+        assert!(branch.ticket_key_for(&["proj".to_string()]).is_some());
+        assert!(branch
+            .ticket_key_for(&["OPS".to_string(), "PROJ".to_string()])
+            .is_some());
+        assert!(branch.ticket_key_for(&["OPS".to_string()]).is_none());
+    }
+
+    #[test]
+    fn rejected_candidate_interior_is_not_rescanned() {
+        // `XPROJ-1` must not satisfy a filter for `PROJ`.
+        let branch = BranchName::parse("XPROJ-1").unwrap();
+        assert!(branch.ticket_key_for(&["PROJ".to_string()]).is_none());
+    }
+
+    #[test]
     fn ticket_key_does_not_match_lowercase() {
-        assert!(BranchName::parse("feature/ax-123")
+        assert!(BranchName::parse("feature/proj-123")
             .unwrap()
             .ticket_key()
             .is_none());

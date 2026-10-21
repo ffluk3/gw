@@ -15,6 +15,7 @@ path = "src/main.rs"
 gw-core = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+toml = { workspace = true }
 clap = { version = "4", features = ["derive", "env"] }
 unicode-width = "0.2"
 

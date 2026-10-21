@@ -57,7 +57,7 @@ fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
     let mut protected = std::collections::BTreeSet::new();
 
     for i in 0..count {
-        let branch = BranchName::parse(&format!("AX-{i}")).unwrap();
+        let branch = BranchName::parse(&format!("PROJ-{i}")).unwrap();
         let is_protected = rng.bool();
         if is_protected {
             protected.insert(branch.clone());
@@ -69,7 +69,7 @@ fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
         };
         let age_days = i64::try_from(rng.next() % 30).expect("0..30 fits in i64");
         worktrees.push(WorktreeSnapshot {
-            path: PathBuf::from(format!("/repo/worktrees/AX-{i}")),
+            path: PathBuf::from(format!("/repo/worktrees/PROJ-{i}")),
             branch: Some(branch),
             head,
             kind: *rng.pick(&kinds),

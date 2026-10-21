@@ -105,13 +105,13 @@ mod tests {
 worktree /Users/me/repo/.bare
 bare
 
-worktree /Users/me/repo/worktrees/AX-47383
+worktree /Users/me/repo/worktrees/PROJ-47383
 HEAD 5e44305893b2
-branch refs/heads/AX-47383
+branch refs/heads/PROJ-47383
 
-worktree /Users/me/repo/worktrees/AX-49968
+worktree /Users/me/repo/worktrees/PROJ-49968
 HEAD 611a7b0f031a
-branch refs/heads/AX-49968
+branch refs/heads/PROJ-49968
 prunable gitdir file points to non-existent location
 
 worktree /Users/me/repo/.bare/.claude/worktrees/agent-a636779e4451f7a77
@@ -148,7 +148,7 @@ branch refs/heads/feature/x
     fn parses_branch_and_head() {
         let entries = parse_worktree_list(REAL_OUTPUT);
         let wt = &entries[1];
-        assert_eq!(wt.branch.as_ref().unwrap().as_str(), "AX-47383");
+        assert_eq!(wt.branch.as_ref().unwrap().as_str(), "PROJ-47383");
         assert_eq!(wt.head.as_ref().unwrap().as_str(), "5e44305893b2");
         assert!(!wt.bare);
         assert!(!wt.prunable);
@@ -161,7 +161,7 @@ branch refs/heads/feature/x
         let wt = &entries[2];
         assert!(wt.prunable);
         assert_eq!(wt.kind(), gw_core::WorktreeKind::Prunable);
-        assert_eq!(wt.branch.as_ref().unwrap().as_str(), "AX-49968");
+        assert_eq!(wt.branch.as_ref().unwrap().as_str(), "PROJ-49968");
     }
 
     #[test]
@@ -194,10 +194,10 @@ branch refs/heads/feature/x
 
     #[test]
     fn unknown_keys_are_ignored() {
-        let input = "worktree /repo/wt\nHEAD abc123\nbranch refs/heads/AX-1\nsomething-new yes\n";
+        let input = "worktree /repo/wt\nHEAD abc123\nbranch refs/heads/PROJ-1\nsomething-new yes\n";
         let entries = parse_worktree_list(input);
         assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].branch.as_ref().unwrap().as_str(), "AX-1");
+        assert_eq!(entries[0].branch.as_ref().unwrap().as_str(), "PROJ-1");
     }
 
     #[test]

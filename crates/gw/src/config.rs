@@ -25,6 +25,9 @@ pub fn resolve_layout(
 ) -> Result<Layout, Error> {
     if let Some(root) = explicit {
         let root = normalize_root(root)?;
+        if !crate::repos::is_layout(&root) {
+            return Err(Error::Usage(no_layout_at(&root)));
+        }
         return Ok(Layout::new(root));
     }
 
@@ -55,14 +58,38 @@ pub fn resolve_layout(
 }
 
 /// Accept a root, a `.bare` directory, or either with a trailing slash.
+///
+/// The result is absolute and, when it exists, symlink-resolved. Worktree
+/// paths are passed back to git, so a relative `--repo` would otherwise be
+/// re-interpreted against the bare repository instead of the caller's cwd.
 fn normalize_root(root: &Path) -> Result<PathBuf, Error> {
-    if root.ends_with(".bare") {
-        return root
-            .parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| Error::Usage(format!("{} has no parent directory", root.display())));
+    let root = if root.ends_with(".bare") {
+        root.parent()
+            .ok_or_else(|| Error::Usage(format!("{} has no parent directory", root.display())))?
+    } else {
+        root
+    };
+    let absolute = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(root)
+    };
+    Ok(std::fs::canonicalize(&absolute).unwrap_or(absolute))
+}
+
+fn no_layout_at(root: &Path) -> String {
+    let mut message = format!("{} is not a gw layout (no .bare/HEAD).", root.display());
+    if root.is_dir() {
+        let layouts = crate::repos::layouts_under(root);
+        if !layouts.is_empty() {
+            message.push_str("\n\nLayouts under this directory:");
+            for slug in layouts.iter().take(20) {
+                message.push_str(&format!("\n  {slug}"));
+            }
+            message.push_str("\n\nPick one with --repo <name>.");
+        }
     }
-    Ok(root.to_path_buf())
+    message
 }
 
 /// Walk up looking for a directory that contains `.bare/HEAD`.
@@ -156,20 +183,20 @@ mod tests {
     #[test]
     fn slug_from_ssh_remote() {
         assert_eq!(
-            repo_slug("git@github.com:FlockFreight/platform.git").as_deref(),
-            Some("FlockFreight/platform")
+            repo_slug("git@github.com:acme/widgets.git").as_deref(),
+            Some("acme/widgets")
         );
     }
 
     #[test]
     fn slug_from_https_remote() {
         assert_eq!(
-            repo_slug("https://github.com/FlockFreight/platform.git").as_deref(),
-            Some("FlockFreight/platform")
+            repo_slug("https://github.com/acme/widgets.git").as_deref(),
+            Some("acme/widgets")
         );
         assert_eq!(
-            repo_slug("https://github.com/FlockFreight/platform").as_deref(),
-            Some("FlockFreight/platform")
+            repo_slug("https://github.com/acme/widgets").as_deref(),
+            Some("acme/widgets")
         );
     }
 
@@ -178,17 +205,30 @@ mod tests {
         assert!(repo_slug("https://gitlab.com/owner/name.git").is_none());
     }
 
+    fn layout_root() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join(".bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(bare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        dir
+    }
+
     #[test]
     fn explicit_bare_path_uses_parent() {
-        let layout =
-            resolve_layout(Some(Path::new("/repo/.bare")), Path::new("/x"), &NoGit).unwrap();
-        assert_eq!(layout.root, PathBuf::from("/repo"));
+        let dir = layout_root();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        let layout = resolve_layout(Some(&root.join(".bare")), Path::new("/x"), &NoGit).unwrap();
+        assert_eq!(layout.root, root);
     }
 
     #[test]
     fn explicit_root_is_used_directly() {
-        let layout = resolve_layout(Some(Path::new("/repo")), Path::new("/x"), &NoGit).unwrap();
-        assert_eq!(layout.bare, PathBuf::from("/repo/.bare"));
+        let dir = layout_root();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+
+        let layout = resolve_layout(Some(&root), Path::new("/x"), &NoGit).unwrap();
+        assert_eq!(layout.bare, root.join(".bare"));
     }
 
     struct NoGit;

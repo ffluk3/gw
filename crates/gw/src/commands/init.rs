@@ -8,12 +8,12 @@ use crate::output::Outcome;
 /// Create the bare-repo layout from a remote.
 ///
 /// This is the one command that does not require an existing layout, so it does
-/// not go through `Context`. It is the replacement for `worktree_setup.sh`, with
-/// the repository, branch, and destination all explicit instead of hardcoded.
+/// not go through `Context`. The repository, branch, and destination are all
+/// explicit instead of hardcoded.
 pub fn run(args: InitArgs) -> Result<Outcome, Error> {
     let root = match args.dir {
         Some(dir) => dir,
-        None => default_root(&args.remote)?,
+        None => default_root(&args.remote, &crate::repos::repos_root())?,
     };
     let root = absolute(&root)?;
 
@@ -113,19 +113,53 @@ pub fn run(args: InitArgs) -> Result<Outcome, Error> {
     Ok(Outcome::ok())
 }
 
-/// `owner/name` or `name` → `./name`, stripping `.git`.
-fn default_root(remote: &str) -> Result<PathBuf, Error> {
+/// `owner/name` → `<repos>/owner/name`, `name` → `<repos>/name`.
+///
+/// The owner is only taken from a network remote. A local path such as
+/// `/srv/git/thing.git` contributes just its final component, so its parent
+/// directory never becomes a bogus owner.
+fn default_root(remote: &str, repos_root: &Path) -> Result<PathBuf, Error> {
+    let (owner, name) = remote_parts(remote).ok_or_else(|| {
+        Error::Usage(format!(
+            "cannot derive a directory name from '{remote}'; pass --dir"
+        ))
+    })?;
+    Ok(match owner {
+        Some(owner) => repos_root.join(owner).join(name),
+        None => repos_root.join(name),
+    })
+}
+
+/// Split a remote into `(owner, name)`, with the owner present only when the
+/// remote is a network URL or scp-style address.
+fn remote_parts(remote: &str) -> Option<(Option<String>, String)> {
     let trimmed = remote.trim().trim_end_matches('/').trim_end_matches(".git");
-    let name = trimmed
-        .rsplit(['/', ':'])
-        .next()
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| {
-            Error::Usage(format!(
-                "cannot derive a directory name from '{remote}'; pass --dir"
-            ))
-        })?;
-    Ok(PathBuf::from(name))
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let (path, network) = if let Some((_scheme, rest)) = trimmed.split_once("://") {
+        let path = rest.split_once('/').map_or("", |(_, path)| path);
+        (path, true)
+    } else if let Some((host, path)) = trimmed.split_once(':') {
+        // scp-like `git@host:owner/name`; a local path has no ':' before a '/'.
+        if host.contains('/') {
+            (trimmed, false)
+        } else {
+            (path, true)
+        }
+    } else {
+        (trimmed, false)
+    };
+
+    let parts: Vec<&str> = path.split('/').filter(|s| !s.is_empty()).collect();
+    let name = parts.last()?.to_string();
+    let owner = if network && parts.len() >= 2 {
+        Some(parts[parts.len() - 2].to_string())
+    } else {
+        None
+    };
+    Some((owner, name))
 }
 
 fn absolute(path: &Path) -> Result<PathBuf, Error> {
@@ -183,36 +217,40 @@ fn git(cwd: &Path, args: &[&str]) -> Result<(), Error> {
 mod tests {
     use super::*;
 
+    fn root() -> PathBuf {
+        PathBuf::from("/repos")
+    }
+
     #[test]
     fn default_root_from_ssh_url() {
         assert_eq!(
-            default_root("git@github.com:owner/thing.git").unwrap(),
-            PathBuf::from("thing")
+            default_root("git@github.com:owner/thing.git", &root()).unwrap(),
+            PathBuf::from("/repos/owner/thing")
         );
     }
 
     #[test]
     fn default_root_from_https_url() {
         assert_eq!(
-            default_root("https://github.com/owner/thing.git").unwrap(),
-            PathBuf::from("thing")
+            default_root("https://github.com/owner/thing.git", &root()).unwrap(),
+            PathBuf::from("/repos/owner/thing")
         );
         assert_eq!(
-            default_root("https://github.com/owner/thing/").unwrap(),
-            PathBuf::from("thing")
+            default_root("https://github.com/owner/thing/", &root()).unwrap(),
+            PathBuf::from("/repos/owner/thing")
         );
     }
 
     #[test]
     fn default_root_from_local_path() {
         assert_eq!(
-            default_root("/srv/git/thing.git").unwrap(),
-            PathBuf::from("thing")
+            default_root("/srv/git/thing.git", &root()).unwrap(),
+            PathBuf::from("/repos/thing")
         );
     }
 
     #[test]
     fn default_root_rejects_empty() {
-        assert!(default_root("/").is_err());
+        assert!(default_root("/", &root()).is_err());
     }
 }

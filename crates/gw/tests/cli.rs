@@ -12,7 +12,7 @@ struct Fixture {
 }
 
 impl Fixture {
-    /// Build the layout `worktree_setup.sh` creates: a bare repo at
+    /// Build the conventional layout: a bare repo at
     /// `<root>/.bare` cloned from a separate origin, with a `develop` worktree
     /// at `<root>/worktrees/develop`.
     ///
@@ -103,12 +103,9 @@ impl Fixture {
     }
 
     fn gw_in(&self, cwd: &Path, args: &[&str]) -> Output {
-        let out = Command::new(env!("CARGO_BIN_EXE_gw"))
-            .current_dir(cwd)
+        let mut cmd = gw_command(cwd);
+        let out = cmd
             .args(args)
-            .env_remove("GW_JIRA_BASE_URL")
-            .env_remove("GW_JIRA_USER")
-            .env_remove("GW_JIRA_API_TOKEN")
             .env("GW_REPO", self.root.to_str().unwrap())
             .output()
             .expect("run gw");
@@ -124,6 +121,36 @@ struct Output {
     code: i32,
     stdout: String,
     stderr: String,
+}
+
+/// A `gw` process with every ambient `gw` setting removed.
+///
+/// Without this, a developer's own `GW_REPOS_ROOT` or JIRA credentials would
+/// change what the tests observe.
+fn gw_command(cwd: &Path) -> Command {
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_gw"));
+    cmd.current_dir(cwd)
+        .env_remove("GW_REPO")
+        .env_remove("GW_REPOS_ROOT")
+        .env_remove("GW_JIRA_PROJECT")
+        .env_remove("GW_JIRA_BASE_URL")
+        .env_remove("GW_JIRA_USER")
+        .env_remove("GW_JIRA_API_TOKEN");
+    cmd
+}
+
+fn gw_with_env(cwd: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut cmd = gw_command(cwd);
+    cmd.args(args);
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    let out = cmd.output().expect("run gw");
+    Output {
+        code: out.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+    }
 }
 
 fn run(cwd: &Path, args: &[&str]) {
@@ -142,7 +169,7 @@ fn run(cwd: &Path, args: &[&str]) {
 #[test]
 fn status_lists_worktrees_and_skips_the_bare_entry() {
     let fx = Fixture::new();
-    fx.add_worktree("AX-1");
+    fx.add_worktree("PROJ-1");
 
     let out = fx.gw(&["status", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -154,7 +181,7 @@ fn status_lists_worktrees_and_skips_the_bare_entry() {
         .map(|w| w["branch"].as_str().unwrap_or(""))
         .collect();
     assert!(branches.contains(&"develop"), "got {branches:?}");
-    assert!(branches.contains(&"AX-1"), "got {branches:?}");
+    assert!(branches.contains(&"PROJ-1"), "got {branches:?}");
     assert!(
         !branches.iter().any(|b| b.is_empty()),
         "bare entry leaked into status: {branches:?}"
@@ -164,7 +191,7 @@ fn status_lists_worktrees_and_skips_the_bare_entry() {
 #[test]
 fn clean_dry_run_changes_nothing() {
     let fx = Fixture::new();
-    let wt = fx.add_worktree("AX-2");
+    let wt = fx.add_worktree("PROJ-2");
 
     let out = fx.gw(&["clean", "--dry-run", "--skip-github"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -174,8 +201,8 @@ fn clean_dry_run_changes_nothing() {
 #[test]
 fn clean_refuses_to_remove_a_dirty_worktree() {
     let fx = Fixture::new();
-    let wt = fx.add_worktree("AX-3");
-    fx.publish("AX-3");
+    let wt = fx.add_worktree("PROJ-3");
+    fx.publish("PROJ-3");
     std::fs::write(wt.join("scratch.txt"), "uncommitted\n").unwrap();
 
     let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
@@ -191,7 +218,7 @@ fn clean_refuses_to_remove_a_dirty_worktree() {
 #[test]
 fn clean_refuses_to_remove_unpublished_commits() {
     let fx = Fixture::new();
-    let wt = fx.add_worktree("AX-4");
+    let wt = fx.add_worktree("PROJ-4");
     // Deliberately not published: the tip exists only locally.
     std::fs::write(wt.join("work.txt"), "a commit\n").unwrap();
     run(&wt, &["add", "."]);
@@ -210,8 +237,8 @@ fn clean_refuses_to_remove_unpublished_commits() {
 #[test]
 fn clean_removes_a_clean_published_worktree() {
     let fx = Fixture::new();
-    let wt = fx.add_worktree("AX-8");
-    fx.publish("AX-8");
+    let wt = fx.add_worktree("PROJ-8");
+    fx.publish("PROJ-8");
 
     let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -231,13 +258,13 @@ fn clean_never_touches_the_default_branch_worktree() {
 #[test]
 fn add_reuses_an_existing_worktree() {
     let fx = Fixture::new();
-    fx.add_worktree("AX-5");
+    fx.add_worktree("PROJ-5");
 
-    let out = fx.gw(&["add", "AX-5", "--print-path", "--no-fetch"]);
+    let out = fx.gw(&["add", "PROJ-5", "--print-path", "--no-fetch"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let printed = out.stdout.trim();
     assert!(
-        printed.ends_with("worktrees/AX-5"),
+        printed.ends_with("worktrees/PROJ-5"),
         "unexpected path: {printed}"
     );
 }
@@ -246,10 +273,10 @@ fn add_reuses_an_existing_worktree() {
 fn add_creates_a_new_branch_worktree() {
     let fx = Fixture::new();
 
-    let out = fx.gw(&["add", "AX-6", "--print-path", "--no-fetch"]);
+    let out = fx.gw(&["add", "PROJ-6", "--print-path", "--no-fetch"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(
-        fx.root.join("worktrees/AX-6").is_dir(),
+        fx.root.join("worktrees/PROJ-6").is_dir(),
         "worktree was not created"
     );
 }
@@ -264,7 +291,7 @@ fn add_rejects_an_invalid_branch_name() {
 #[test]
 fn layout_discovery_works_from_inside_a_worktree() {
     let fx = Fixture::new();
-    let wt = fx.add_worktree("AX-7");
+    let wt = fx.add_worktree("PROJ-7");
 
     // No GW_REPO: discovery must find the bare repo from the worktree itself.
     let out = Command::new(env!("CARGO_BIN_EXE_gw"))
@@ -413,17 +440,7 @@ fn source_repo(dir: &Path) -> PathBuf {
 }
 
 fn gw_raw(cwd: &Path, args: &[&str]) -> Output {
-    let out = Command::new(env!("CARGO_BIN_EXE_gw"))
-        .current_dir(cwd)
-        .args(args)
-        .env_remove("GW_REPO")
-        .output()
-        .expect("run gw");
-    Output {
-        code: out.status.code().unwrap_or(-1),
-        stdout: String::from_utf8_lossy(&out.stdout).into_owned(),
-        stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
-    }
+    gw_with_env(cwd, args, &[])
 }
 
 #[test]
@@ -461,7 +478,11 @@ fn init_derives_the_directory_from_the_remote() {
     let tmp = tempfile::tempdir().unwrap();
     let src = source_repo(tmp.path());
 
-    let out = gw_raw(tmp.path(), &["init", src.to_str().unwrap()]);
+    let out = gw_with_env(
+        tmp.path(),
+        &["init", src.to_str().unwrap()],
+        &[("GW_REPOS_ROOT", tmp.path().to_str().unwrap())],
+    );
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(tmp.path().join("source/.bare/HEAD").is_file());
 }
@@ -544,4 +565,155 @@ fn init_refuses_to_clobber_an_existing_layout() {
         "stderr: {}",
         second.stderr
     );
+}
+
+// ---- repos root and name resolution ---------------------------------------
+
+/// Expose a fixture layout under `<repos>/<slug>` without moving it.
+fn link_layout(fx: &Fixture, repos: &Path, slug: &str) {
+    let dest = repos.join(slug);
+    std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
+    std::os::unix::fs::symlink(&fx.root, &dest).unwrap();
+}
+
+#[test]
+fn add_works_from_outside_a_repository_with_repo_path() {
+    let fx = Fixture::new();
+    let elsewhere = tempfile::tempdir().unwrap();
+
+    let out = gw_with_env(
+        elsewhere.path(),
+        &[
+            "--repo",
+            fx.root.to_str().unwrap(),
+            "add",
+            "PROJ-9",
+            "--print-path",
+            "--no-fetch",
+        ],
+        &[],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(fx.root.join("worktrees/PROJ-9").is_dir());
+}
+
+#[test]
+fn repo_slug_resolves_under_the_repos_root() {
+    let fx = Fixture::new();
+    let outer = tempfile::tempdir().unwrap();
+    let repos = outer.path().join("repos");
+    link_layout(&fx, &repos, "acme/widgets");
+
+    let out = gw_with_env(
+        outer.path(),
+        &["--repo", "acme/widgets", "status", "--json"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert!(!json["worktrees"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn repo_unique_name_resolves_under_the_repos_root() {
+    let fx = Fixture::new();
+    let outer = tempfile::tempdir().unwrap();
+    let repos = outer.path().join("repos");
+    link_layout(&fx, &repos, "acme/widgets");
+
+    let out = gw_with_env(
+        outer.path(),
+        &["--repo", "widgets", "status", "--json"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+}
+
+#[test]
+fn repo_pointing_at_a_non_layout_is_a_usage_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = gw_with_env(
+        tmp.path(),
+        &["--repo", tmp.path().to_str().unwrap(), "status"],
+        &[],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("not a gw layout"),
+        "stderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn repos_lists_layouts_under_the_root() {
+    let fx = Fixture::new();
+    let outer = tempfile::tempdir().unwrap();
+    let repos = outer.path().join("repos");
+    link_layout(&fx, &repos, "acme/widgets");
+
+    let out = gw_with_env(
+        outer.path(),
+        &["repos", "--json"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let rows = json["repos"].as_array().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0]["repo"], "acme/widgets");
+    assert!(rows[0]["worktrees"].as_u64().unwrap() >= 1);
+}
+
+// ---- configurable JIRA project --------------------------------------------
+
+fn ticket_for<'a>(json: &'a serde_json::Value, branch: &str) -> &'a serde_json::Value {
+    json["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["branch"] == branch)
+        .unwrap_or_else(|| panic!("no row for {branch}"))
+        .get("ticket")
+        .unwrap()
+}
+
+#[test]
+fn gw_toml_project_filters_ticket_keys() {
+    let fx = Fixture::new();
+    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    fx.add_worktree("PROJ-42");
+    fx.add_worktree("OTHER-7");
+
+    let out = fx.gw(&["status", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+
+    assert_eq!(ticket_for(&json, "PROJ-42"), "PROJ-42");
+    assert!(
+        ticket_for(&json, "OTHER-7").is_null(),
+        "a non-project key was treated as a ticket"
+    );
+}
+
+#[test]
+fn cli_project_overrides_gw_toml() {
+    let fx = Fixture::new();
+    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    fx.add_worktree("PROJ-42");
+    fx.add_worktree("OTHER-7");
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &["status", "--json"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_JIRA_PROJECT", "OTHER"),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+
+    assert!(ticket_for(&json, "PROJ-42").is_null());
+    assert_eq!(ticket_for(&json, "OTHER-7"), "OTHER-7");
 }

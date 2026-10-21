@@ -45,29 +45,63 @@ worktree, then changes your directory into it.
 
 | You are in | Example |
 | --- | --- |
-| a worktree | `<root>/worktrees/AX-1/` |
-| a subdirectory of a worktree | `<root>/worktrees/AX-1/src/` |
+| a worktree | `<root>/worktrees/PROJ-1/` |
+| a subdirectory of a worktree | `<root>/worktrees/PROJ-1/src/` |
 | the bare repository | `<root>/.bare/` |
 | the layout root | `<root>/` |
 | a subdirectory of the layout root | `<root>/notes/` |
+| anywhere, with a repo name | `gw --repo owner/name status` |
 
 `gw` goes up from the current directory until it finds the root. Thus a
 subdirectory works.
 
 `gw` does not work in a normal clone, or in a directory that is not a
-repository. In this case, `gw` stops and shows you the two commands that
-continue the work:
+repository. In this case, `gw` stops and shows you the ways to continue:
 
 ```
 gw --repo <root> status          point at an existing layout
+gw --repo owner/name status      name a layout under the repos root
 gw init <remote> --dir <root>    make a new layout
 ```
 
-`gw init` is the exception. It makes a layout, so it does not need an existing
+`gw init` and `gw repos` are the exceptions. They do not need an existing
 layout.
 
 If you are not sure which repository `gw` will use, run `gw status`. The first
 line shows the root that `gw` found.
+
+## The repos root
+
+A repos root is a directory that holds many layouts. The convention is:
+
+```
+<repos>/
+  <owner>/
+    <name>/          a layout root
+      .bare/
+      worktrees/
+```
+
+Set `GW_REPOS_ROOT` to use a directory other than `~/repos`.
+
+When `--repo` is not an existing path, `gw` reads it as a repository name:
+
+```bash
+gw --repo owner/name status     # <repos>/owner/name
+gw --repo name status           # must be the only layout named "name"
+gw --repo ./some/dir status     # an ordinary path, used as-is
+```
+
+A name that matches more than one repository is an error, and the error lists
+the matches. `GW_REPO` is the environment equivalent of `--repo` and accepts
+the same values, so `gw add` works outside every repository:
+
+```bash
+GW_REPOS_ROOT=~/repos gw --repo owner/name add PROJ-123
+```
+
+`gw init` puts a new layout under the repos root when you do not pass `--dir`.
+The owner comes from the remote URL; a local path contributes only its name.
 
 ## Commands
 
@@ -87,7 +121,9 @@ The command does these steps:
 3. It checks out the default branch at `<root>/worktrees/<branch>/`.
 
 The `--dir` value is optional. If you do not give it, `gw` uses
-`./<repo-name>`. For the example above, the default is `thing`.
+`<repos>/<owner>/<name>`. For the example above, the default is
+`~/repos/owner/thing`. A local remote such as `/srv/git/thing.git` has no
+owner, so its default is `~/repos/thing`.
 
 ```bash
 gw init <remote> --dir <root> --branch develop   # choose the first checkout
@@ -104,7 +140,7 @@ summary of the ticket in the branch name.
 
 ```
 BRANCH              LAST COMMIT  DIRTY  STATE    SUMMARY
-AX-47383            2d ago       ●               Add rate limiting
+PROJ-47383            2d ago       ●               Add rate limiting
 develop             1h ago
 ```
 
@@ -129,8 +165,8 @@ The checkout directory follows the branch name. Thus `feature/x` goes to
 `worktrees/feature/x`.
 
 ```bash
-gwadd AX-1234                   # make or reuse the worktree, then cd into it
-gw add AX-1234 --print-path     # show the path only
+gwadd PROJ-1234                   # make or reuse the worktree, then cd into it
+gw add PROJ-1234 --print-path     # show the path only
 ```
 
 Use `--no-fetch` to skip the fetch from origin.
@@ -168,19 +204,67 @@ command that makes the branch again:
 
 ```
 Deleted branches can be restored with:
-   git branch AX-1 9df03e38ae0
+   git branch PROJ-1 9df03e38ae0
 ```
 
+### `gw repos`
+
+List the layouts under the repos root. The command is read-only.
+
+```
+Layouts under /home/me/repos
+
+REPO             WORKTREES  LAST COMMIT  JIRA
+acme/widgets            4        2h ago  PROJ
+acme/other              1       12d ago  —
+```
+
+`LAST COMMIT` is the newest commit across the layout's worktrees. The `JIRA`
+column is the project keys declared in that layout's `.gw.toml`.
+
+```bash
+gw repos                  # list layouts
+gw repos --dirty          # also count dirty worktrees
+gw repos --json           # machine-readable output
+```
+
+`--dirty` runs `git status` in every worktree, so it is opt-in.
+
 ## Configuration
+
+Configuration has two levels. `.gw.toml` belongs to one layout. Environment
+variables and flags apply to the command you run.
+
+### `.gw.toml`
+
+Put an optional `.gw.toml` at the layout root, beside `.bare`. It is not part
+of any checkout, so it is local to the machine. An unknown key or a syntax
+error stops the command with exit code 2.
+
+```toml
+[jira]
+project = "PROJ"                                # a string or a list
+base_url = "https://acme.atlassian.net"
+```
+
+`project` limits which branch prefixes count as ticket keys. Without it, any
+key of the form `ABC-123` counts. `base_url` is the JIRA base URL; the
+credentials stay in the environment and are never read from this file.
+
+Precedence, highest first: command-line flag, environment variable, `.gw.toml`.
+
+### Environment
 
 All the variables are optional. `gw` finds the rest from the repository.
 
 | Variable | Function |
 | --- | --- |
-| `GW_REPO` | The layout root, when you are not inside one. The same as `--repo`. |
+| `GW_REPO` | The layout root or repo name, when you are not inside one. The same as `--repo`. |
+| `GW_REPOS_ROOT` | The directory that holds layouts. Default: `~/repos`. |
 | `GW_STALE_DAYS` | The stale limit in days. Default: 7. |
 | `GW_PROTECT` | A comma-separated list of branches that `gw` must not delete. |
-| `GW_JIRA_BASE_URL` | The JIRA base URL. The JIRA lookups start when you set it. |
+| `GW_JIRA_PROJECT` | A comma-separated list of JIRA project keys. The same as `--jira-project`. |
+| `GW_JIRA_BASE_URL` | The JIRA base URL. The same as `--jira-url`. |
 | `GW_JIRA_USER` | The JIRA user name. `JIRA_USER` also works. |
 | `GW_JIRA_API_TOKEN` | The JIRA API token. `JIRA_API_TOKEN` also works. |
 | `NO_COLOR` | Disable the color and the emoji. |

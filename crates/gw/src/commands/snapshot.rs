@@ -118,10 +118,17 @@ pub fn attach_merged(snapshot: &mut RepoSnapshot, merged: &std::collections::Has
 }
 
 /// Attach JIRA ticket state to the snapshot.
-pub fn attach_tickets(snapshot: &mut RepoSnapshot, info: &crate::jira::TicketInfo) {
+///
+/// `projects` restricts which branch prefixes count as tickets; an empty slice
+/// accepts any JIRA-shaped key.
+pub fn attach_tickets(
+    snapshot: &mut RepoSnapshot,
+    info: &crate::jira::TicketInfo,
+    projects: &[String],
+) {
     for wt in &mut snapshot.worktrees {
         let Some(branch) = &wt.branch else { continue };
-        let Some(key) = branch.ticket_key() else {
+        let Some(key) = branch.ticket_key_for(projects) else {
             continue;
         };
         if let Some(status) = info.status.get(key.as_str()) {
@@ -151,11 +158,15 @@ pub fn pr_candidates(snapshot: &RepoSnapshot) -> Vec<BranchName> {
 }
 
 /// Total ticket keys referenced by the snapshot.
-pub fn ticket_keys(snapshot: &RepoSnapshot) -> Vec<gw_core::TicketKey> {
+pub fn ticket_keys(snapshot: &RepoSnapshot, projects: &[String]) -> Vec<gw_core::TicketKey> {
     let mut keys: Vec<_> = snapshot
         .worktrees
         .iter()
-        .filter_map(|wt| wt.branch.as_ref().and_then(gw_core::BranchName::ticket_key))
+        .filter_map(|wt| {
+            wt.branch
+                .as_ref()
+                .and_then(|branch| branch.ticket_key_for(projects))
+        })
         .collect();
     keys.sort();
     keys.dedup();

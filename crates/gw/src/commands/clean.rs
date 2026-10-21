@@ -44,7 +44,7 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     snapshot::attach_merged(&mut snap, &merged);
 
     if !args.no_jira {
-        attach_jira(&mut snap);
+        attach_jira(ctx, &mut snap);
     }
 
     let plan = classify_clean(&snap, &policy);
@@ -135,17 +135,17 @@ fn attach_github(
     }
 }
 
-fn attach_jira(snap: &mut gw_core::RepoSnapshot) {
-    let Some(jira) = JiraRest::from_env() else {
+fn attach_jira(ctx: &Context, snap: &mut gw_core::RepoSnapshot) {
+    let Some(jira) = JiraRest::from_settings(&ctx.settings) else {
         return;
     };
-    let keys = snapshot::ticket_keys(snap);
+    let keys = snapshot::ticket_keys(snap, &ctx.settings.jira_projects);
     if keys.is_empty() {
         return;
     }
     let backend: Box<dyn JiraBackend> = Box::new(jira);
     match backend.lookup(&keys) {
-        Ok(info) => snapshot::attach_tickets(snap, &info),
+        Ok(info) => snapshot::attach_tickets(snap, &info, &ctx.settings.jira_projects),
         Err(e) => eprintln!("warning: {e}"),
     }
 }

@@ -9,6 +9,8 @@ mod git;
 mod github;
 mod jira;
 mod output;
+mod repos;
+mod settings;
 
 use clap::Parser;
 
@@ -18,9 +20,15 @@ use crate::context::Context;
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    // `init` creates a layout, so it cannot require one to exist first.
-    if let Command::Init(args) = cli.command {
-        return finish(commands::init::run(args));
+    // `init` creates a layout and `repos` lists them, so neither can require
+    // one to exist first.
+    if matches!(&cli.command, Command::Init(_) | Command::Repos(_)) {
+        let result = match cli.command {
+            Command::Init(args) => commands::init::run(args),
+            Command::Repos(args) => commands::repos::run(&args, cli.json),
+            _ => unreachable!("guarded above"),
+        };
+        return finish(result);
     }
 
     let ctx = match Context::load(&cli) {
@@ -35,7 +43,7 @@ fn main() -> ExitCode {
         Command::Status(args) => commands::status::run(&ctx, args),
         Command::Add(args) => commands::add::run(&ctx, args),
         Command::Clean(args) => commands::clean::run(&ctx, args),
-        Command::Init(_) => unreachable!("handled above"),
+        Command::Init(_) | Command::Repos(_) => unreachable!("handled above"),
     };
     finish(result)
 }

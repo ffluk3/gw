@@ -106,7 +106,7 @@ mod tests {
 
     #[test]
     fn ascii_width() {
-        assert_eq!(display_width("AX-1"), 4);
+        assert_eq!(display_width("PROJ-1"), 6);
     }
 
     #[test]

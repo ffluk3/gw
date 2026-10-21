@@ -22,6 +22,10 @@ use clap::{Args, Parser, Subcommand};
         \n\
         \x20 'gw init' is the exception: it creates a layout and needs no existing one.\n\
         \n\
+        \x20 --repo also accepts an owner/name (or unique name) resolved under\n\
+        \x20 GW_REPOS_ROOT (default ~/repos), so a command works from anywhere:\n\
+        \x20   gw --repo owner/name status\n\
+        \n\
         \x20 GW_REPO=<root> is the environment equivalent of --repo.",
     long_about = "Gw manages one worktree per branch under <root>/worktrees, backed by a bare \
                   repository at <root>/.bare.\n\n\
@@ -30,9 +34,10 @@ use clap::{Args, Parser, Subcommand};
                   particular repository, host, or ticket system is built in."
 )]
 pub struct Cli {
-    /// Override the repository root (default: discovered from cwd).
-    #[arg(long, global = true, env = "GW_REPO")]
-    pub repo: Option<PathBuf>,
+    /// Repository path, or an owner/name resolved under the repos root
+    /// (default: discovered from cwd).
+    #[arg(long, global = true, env = "GW_REPO", value_name = "PATH|SLUG")]
+    pub repo: Option<String>,
 
     /// Force machine-readable output.
     #[arg(long, global = true)]
@@ -41,6 +46,25 @@ pub struct Cli {
     /// Disable color and emoji.
     #[arg(long, global = true, env = "NO_COLOR")]
     pub no_color: bool,
+
+    /// JIRA project key(s) a branch name may reference. Comma-separated.
+    #[arg(
+        long = "jira-project",
+        global = true,
+        env = "GW_JIRA_PROJECT",
+        value_delimiter = ',',
+        value_name = "KEY"
+    )]
+    pub jira_project: Vec<String>,
+
+    /// JIRA base URL. Overrides the value in `.gw.toml`.
+    #[arg(
+        long = "jira-url",
+        global = true,
+        env = "GW_JIRA_BASE_URL",
+        value_name = "URL"
+    )]
+    pub jira_url: Option<String>,
 
     #[command(subcommand)]
     pub command: Command,
@@ -59,6 +83,8 @@ pub enum Command {
     Add(AddArgs),
     /// Remove stale and merged worktrees, and delete stale orphan branches.
     Clean(CleanArgs),
+    /// List the layouts under the repos root.
+    Repos(ReposArgs),
 }
 
 #[derive(Debug, Args)]
@@ -102,6 +128,14 @@ pub struct AddArgs {
     /// Do not fetch from origin first.
     #[arg(long)]
     pub no_fetch: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct ReposArgs {
+    /// Also count worktrees with uncommitted changes. This runs one
+    /// `git status` per worktree, so it is opt-in.
+    #[arg(long)]
+    pub dirty: bool,
 }
 
 #[derive(Debug, Args)]

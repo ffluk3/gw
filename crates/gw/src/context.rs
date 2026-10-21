@@ -6,13 +6,14 @@ use crate::cli::Cli;
 use crate::config::resolve_layout;
 use crate::error::Error;
 use crate::git::{CliGit, GitBackend};
+use crate::settings::Settings;
 
 /// Everything a command needs, wired once.
 pub struct Context {
     pub layout: Layout,
     pub git: CliGit,
+    pub settings: Settings,
     pub json: bool,
-    pub no_color: bool,
 }
 
 impl Context {
@@ -22,7 +23,11 @@ impl Context {
         // Discovery needs a git handle, but that handle needs the bare path.
         // Probe with an unanchored handle first, then rebuild anchored.
         let probe = CliGit::new(cwd.clone());
-        let mut layout = resolve_layout(cli.repo.as_deref(), &cwd, &probe as &dyn GitBackend)?;
+        let explicit = match cli.repo.as_deref() {
+            Some(value) => Some(crate::repos::resolve_repo_arg(value, &cwd)?),
+            None => None,
+        };
+        let mut layout = resolve_layout(explicit.as_deref(), &cwd, &probe as &dyn GitBackend)?;
 
         let git = CliGit::new(layout.bare.clone());
 
@@ -35,11 +40,13 @@ impl Context {
             }
         }
 
+        let settings = Settings::load(&layout.root, &cli.jira_project, cli.jira_url.as_deref())?;
+
         Ok(Self {
             git,
             layout,
+            settings,
             json: cli.json,
-            no_color: cli.no_color,
         })
     }
 

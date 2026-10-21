@@ -84,6 +84,6 @@ mod tests {
 
     #[test]
     fn restore_hint_is_usable() {
-        assert_eq!(restore_hint("AX-1", "abc123"), "git branch AX-1 abc123");
+        assert_eq!(restore_hint("PROJ-1", "abc123"), "git branch PROJ-1 abc123");
     }
 }
