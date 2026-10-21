@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.2](https://github.com/ffluk3/gw/compare/v0.1.1...v0.1.2) - 2026-10-21
+
+### Added
+
+- genericize and add repo-root and JIRA project configuration
+- git worktree manager for bare-repo layouts
+
+### Fixed
+
+- support standard json flows
+- satisfy clippy on the pinned toolchain
+
+### Other
+
+- Merge pull request #3 from ffluk3/release-plz-2026-10-21T22-58-16Z
+- release v0.1.1
+- release v0.1.0
+- correct clippy findings
+
 ## [0.1.1](https://github.com/ffluk3/gw/compare/v0.1.0...v0.1.1) - 2026-10-21
 
 ### Added
