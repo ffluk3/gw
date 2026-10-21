@@ -27,7 +27,11 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     };
 
     let now = now_epoch();
-    println!("🔍 Scanning worktrees in {}", ctx.layout.root.display());
+    // In JSON mode stdout carries exactly one JSON document. Every progress
+    // line goes to stderr so a consumer can parse stdout without stripping.
+    if !ctx.is_json() {
+        println!("🔍 Scanning worktrees in {}", ctx.layout.root.display());
+    }
 
     // Refresh remote refs so "unpublished" is judged against current origin.
     if let Err(e) = ctx.git.fetch_prune() {
@@ -48,18 +52,21 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     }
 
     let plan = classify_clean(&snap, &policy);
+    let apply = should_apply(&args, &plan, ctx.is_json());
 
-    let apply = should_apply(&args, &plan);
-    if ctx.is_json() {
-        println!("{}", gw_core::render::json::to_json_string(&plan));
-    } else if plan.is_empty() {
-        println!("(no worktrees)");
-    } else {
-        print!("{}", render_table(&plan));
-        print_recommendations(&plan);
+    if !ctx.is_json() {
+        if plan.is_empty() {
+            println!("(no worktrees)");
+        } else {
+            print!("{}", render_table(&plan));
+            print_recommendations(&plan);
+        }
     }
 
     if !apply {
+        if ctx.is_json() {
+            println!("{}", gw_core::render::json::to_json_string(&plan, false));
+        }
         if !plan.is_empty() && !ctx.is_json() {
             println!();
             println!("Dry run — nothing changed. Re-run with --yes to apply.");
@@ -68,12 +75,21 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     }
 
     let outcome = execute(ctx, &plan);
+
     if !ctx.is_json() {
         println!();
         println!("🌳 Pruning worktree metadata...");
-        if let Err(e) = ctx.git.worktree_prune() {
-            eprintln!("warning: {e}");
-        }
+    }
+    if let Err(e) = ctx.git.worktree_prune() {
+        eprintln!("warning: {e}");
+    }
+
+    if ctx.is_json() {
+        // Printed after execution so `applied: true` describes work that has
+        // already happened. `execute` writes its own lines to stderr in JSON
+        // mode, so stdout stays a single document.
+        println!("{}", gw_core::render::json::to_json_string(&plan, true));
+    } else {
         let counts = plan.counts();
         println!();
         println!(
@@ -86,7 +102,11 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
 
 /// Applying requires an explicit opt-in, and the default posture is a dry run
 /// whenever a human is not there to watch.
-fn should_apply(args: &CleanArgs, plan: &Plan) -> bool {
+///
+/// A caller that asked for JSON is treated as a script even when stdout is a
+/// terminal: an agent harness may allocate a pty, and `--json` is a request
+/// for machine output, not a confirmation. Only `--yes` applies there.
+fn should_apply(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
     if plan.destructive().count() == 0 {
         return false;
     }
@@ -95,6 +115,9 @@ fn should_apply(args: &CleanArgs, plan: &Plan) -> bool {
     }
     if args.yes {
         return true;
+    }
+    if json {
+        return false;
     }
     // Interactive: yes. Piped or scripted: plan only.
     std::io::stdout().is_terminal()
@@ -113,10 +136,15 @@ fn attach_github(
     if candidates.is_empty() {
         return Ok(HashSet::new());
     }
-    println!(
+    let progress = format!(
         "🔄 Checking GitHub for {} merged PR(s)...",
         candidates.len()
     );
+    if ctx.is_json() {
+        eprintln!("{progress}");
+    } else {
+        println!("{progress}");
+    }
 
     let backend: Box<dyn GithubBackend> = if std::env::var_os("GW_SKIP_GITHUB").is_some() {
         Box::new(NoGithub)
@@ -183,6 +211,9 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
     let mut succeeded = 0;
     let mut failed = 0;
     let mut deleted: Vec<(String, String)> = Vec::new();
+    // In JSON mode stdout is reserved for the single plan document, so the
+    // per-action lines go to stderr like every other progress line.
+    let narrate = !ctx.is_json();
 
     for (target, decision) in &plan.entries {
         match (target, decision) {
@@ -197,14 +228,16 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
                 match ctx.git.worktree_remove(path) {
                     Ok(()) => {
                         succeeded += 1;
-                        println!(
-                            "🗑️  removed {} ({})",
-                            branch.as_ref().map_or_else(
-                                || path.display().to_string(),
-                                |b| b.as_str().to_string()
-                            ),
-                            gw_core::render::human::describe_reason(decision.reason())
-                        );
+                        if narrate {
+                            println!(
+                                "🗑️  removed {} ({})",
+                                branch.as_ref().map_or_else(
+                                    || path.display().to_string(),
+                                    |b| b.as_str().to_string()
+                                ),
+                                gw_core::render::human::describe_reason(decision.reason())
+                            );
+                        }
                     }
                     Err(e) => {
                         failed += 1;
@@ -217,7 +250,9 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
                     Ok(()) => {
                         succeeded += 1;
                         deleted.push((name.as_str().to_string(), tip.as_str().to_string()));
-                        println!("🗑️  deleted branch {} at {}", name.as_str(), tip.short(11));
+                        if narrate {
+                            println!("🗑️  deleted branch {} at {}", name.as_str(), tip.short(11));
+                        }
                     }
                     Err(e) => {
                         failed += 1;
@@ -230,10 +265,19 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
     }
 
     if !deleted.is_empty() {
-        println!();
-        println!("Deleted branches can be restored with:");
+        if narrate {
+            println!();
+            println!("Deleted branches can be restored with:");
+        }
         for (name, sha) in &deleted {
-            println!("   {}", restore_hint(name, sha));
+            // The restore hint is the payload for a deleted branch; it must be
+            // available to scripts too, so it goes to stderr in JSON mode.
+            let hint = restore_hint(name, sha);
+            if narrate {
+                println!("   {hint}");
+            } else {
+                eprintln!("{hint}");
+            }
         }
     }
 
@@ -245,4 +289,90 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
         };
     }
     Outcome::ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gw_core::decision::{Decision, Reason};
+    use gw_core::model::{BranchName, Sha};
+    use gw_core::Plan;
+
+    fn args(yes: bool, dry_run: bool) -> CleanArgs {
+        CleanArgs {
+            dry_run,
+            yes,
+            closed: false,
+            delete_branches: false,
+            skip_github: false,
+            no_jira: false,
+            stale_days: 7,
+        }
+    }
+
+    /// A plan with one destructive entry: enough for `should_apply` to be
+    /// willing to act.
+    fn destructive_plan() -> Plan {
+        Plan {
+            entries: vec![(
+                Target::Branch {
+                    name: BranchName::parse("PROJ-1").unwrap(),
+                },
+                Decision::Delete {
+                    reason: Reason::Stale { age_secs: 100 },
+                    tip: Sha::parse("9df03e38ae0").unwrap(),
+                },
+            )],
+        }
+    }
+
+    fn non_destructive_plan() -> Plan {
+        Plan {
+            entries: vec![(
+                Target::Branch {
+                    name: BranchName::parse("PROJ-2").unwrap(),
+                },
+                Decision::Keep {
+                    reason: Reason::RecentlyActive { age_secs: 1 },
+                },
+            )],
+        }
+    }
+
+    #[test]
+    fn a_plan_with_nothing_destructive_never_applies() {
+        assert!(!should_apply(
+            &args(true, false),
+            &non_destructive_plan(),
+            false
+        ));
+        assert!(!should_apply(
+            &args(true, false),
+            &non_destructive_plan(),
+            true
+        ));
+    }
+
+    #[test]
+    fn yes_applies() {
+        assert!(should_apply(&args(true, false), &destructive_plan(), false));
+        assert!(should_apply(&args(true, false), &destructive_plan(), true));
+    }
+
+    #[test]
+    fn dry_run_wins_over_yes() {
+        assert!(!should_apply(&args(true, true), &destructive_plan(), false));
+    }
+
+    /// The regression this guards: a harness that allocates a pty makes
+    /// `stdout.is_terminal()` true. `--json` must still mean "plan only"
+    /// without `--yes`, or an agent asking for a report destroys worktrees.
+    #[test]
+    fn json_never_applies_without_yes() {
+        assert!(!should_apply(
+            &args(false, false),
+            &destructive_plan(),
+            true
+        ));
+    }
 }

@@ -33,6 +33,7 @@ Create a bare-repo layout.
 | `--dir <DIR>` | Layout root. Default: `<repos>/<owner>/<name>`. |
 | `--branch <BRANCH>` | First checkout. Default: the remote's default branch. |
 | `--dry-run` | Print the plan. Write nothing. |
+| `--json` | Machine-readable result. |
 
 Steps: clone `--bare` into `<root>/.bare`, set the
 `+refs/heads/*:refs/remotes/origin/*` refspec, fetch with prune, then add a
@@ -60,8 +61,9 @@ Create or reuse a worktree.
 
 | Option | Meaning |
 | --- | --- |
-| `--print-path` | Print the worktree path only. Used by the shell wrapper. |
+| `--print-path` | Print the worktree path only. Used by the shell wrapper. Overrides `--json`. |
 | `--no-fetch` | Do not fetch from origin first. |
+| `--json` | Machine-readable result, including whether the worktree was created. |
 
 Strategy selection:
 
@@ -80,13 +82,14 @@ Remove worktrees and delete branches.
 
 | Option | Environment | Meaning |
 | --- | --- | --- |
-| `--dry-run` | — | Plan only. Default when stdout is not a terminal. |
+| `--dry-run` | — | Plan only. Default when stdout is not a terminal, or when `--json` is given. |
 | `--yes`, `-y` | — | Apply without prompting. |
 | `--closed` | — | Also remove worktrees whose ticket is closed. |
 | `--delete-branches` | — | Also delete stale, fully published orphan branches. |
 | `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Default 7. |
 | `--skip-github` | `GW_SKIP_GITHUB` | Skip the merged-PR lookup. |
 | `--no-jira` | — | Skip the JIRA lookup. |
+| `--json` | — | Machine-readable plan, with `applied` saying whether it ran. |
 
 The command fetches with prune first. A fetch failure prints a warning and
 continues against cached refs.
@@ -96,7 +99,8 @@ continues against cached refs.
 worktree under `.claude/worktrees/`.
 
 After a deletion, `gw` prints `git branch <name> <tip>` for each deleted
-branch.
+branch. In JSON mode those hints go to stderr, next to the other progress
+lines, so stdout stays a single document.
 
 ## `gw repos`
 

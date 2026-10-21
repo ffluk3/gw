@@ -17,7 +17,8 @@ gw clean --yes
 ```
 
 `--yes` confirms without a prompt. Without `--yes`, `gw` applies the plan only
-when stdout is a terminal. A piped or scripted run stays a dry run.
+when stdout is a terminal and `--json` was not given. A piped, scripted, or
+JSON run stays a dry run.
 
 ## Change what counts as stale
 

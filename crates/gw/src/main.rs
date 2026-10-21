@@ -24,7 +24,7 @@ fn main() -> ExitCode {
     // one to exist first.
     if matches!(&cli.command, Command::Init(_) | Command::Repos(_)) {
         let result = match cli.command {
-            Command::Init(args) => commands::init::run(args),
+            Command::Init(args) => commands::init::run(args, cli.json),
             Command::Repos(args) => commands::repos::run(&args, cli.json),
             _ => unreachable!("guarded above"),
         };

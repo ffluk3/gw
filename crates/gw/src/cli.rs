@@ -140,7 +140,10 @@ pub struct ReposArgs {
 
 #[derive(Debug, Args)]
 pub struct CleanArgs {
-    /// Plan only; change nothing. This is the default when stdout is not a TTY.
+    /// Plan only; change nothing.
+    ///
+    /// This is also the default when stdout is not a TTY, and when --json is
+    /// given. Only --yes applies a plan in those cases.
     #[arg(long)]
     pub dry_run: bool,
 

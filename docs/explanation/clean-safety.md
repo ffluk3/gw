@@ -61,10 +61,16 @@ Applying a plan requires an explicit opt-in:
 
 - `--dry-run` always plans only
 - otherwise `--yes` applies
+- otherwise `--json` plans only
 - otherwise the plan applies only when stdout is a terminal
 
 A piped or scripted run therefore stays a dry run unless it says `--yes`. The
 default posture follows whether a human is present to watch.
+
+`--json` counts as "no human present" even when stdout is a terminal. An agent
+harness may allocate a pty, and a terminal is not evidence that someone is
+watching. Asking for machine output is a request for a report, not a
+confirmation.
 
 ## Refusal at execution time
 

@@ -12,8 +12,14 @@ gw clean --dry-run --json
 
 `--json` is a global flag. It works with every command.
 
+In JSON mode stdout carries exactly one JSON document. Progress lines,
+warnings, and restore hints go to stderr, so you never need to filter stdout
+before parsing it.
+
 `gw` also treats a non-terminal stdout as scripted for `gw clean`, which means
-`gw clean` stays a dry run there even without `--yes`.
+`gw clean` stays a dry run there even without `--yes`. `--json` implies the
+same: a JSON run without `--yes` plans and changes nothing, even if stdout is a
+terminal.
 
 ## Know the stable contract
 
@@ -58,10 +64,35 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
 
 `dirty` is `null` unless you pass `--dirty`.
 
+### `gw add --json`
+
+```json
+{ "branch": "PROJ-123", "path": "/repo/worktrees/PROJ-123", "created": true }
+```
+
+`--print-path` overrides `--json` and prints the bare path.
+
+### `gw init --json`
+
+```json
+{
+  "remote": "https://github.com/acme/widgets.git",
+  "root": "/home/me/repos/acme/widgets",
+  "bare": "/home/me/repos/acme/widgets/.bare",
+  "worktrees": "/home/me/repos/acme/widgets/worktrees",
+  "branch": "main",
+  "checkout": "/home/me/repos/acme/widgets/worktrees/main",
+  "created": true
+}
+```
+
+`branch` and `checkout` are `null`, and `created` is `false`, on a dry run.
+
 ### `gw clean --json`
 
 ```json
 {
+  "applied": false,
   "entries": [
     {
       "target": { "kind": "worktree", "path": "...", "branch": "PROJ-1" },
@@ -85,6 +116,9 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
 
 Check the exit code before you parse the body.
 
+`applied` tells you whether the plan ran. Use it instead of inferring a dry
+run from the flags you passed.
+
 ## Example
 
 ```bash
@@ -94,4 +128,15 @@ if ! gw clean --dry-run --json > plan.json; then
 fi
 
 jq '.counts.to_remove' plan.json
+```
+
+Plan, then apply, in two steps:
+
+```bash
+gw clean --json > plan.json
+
+if [ "$(jq '.counts.to_remove + .counts.to_delete' plan.json)" -gt 0 ]; then
+  gw clean --yes --json > applied.json
+  jq -e '.applied' applied.json > /dev/null || { echo "not applied" >&2; exit 1; }
+fi
 ```

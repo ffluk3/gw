@@ -6,6 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use serde_json::json;
+
 struct Fixture {
     _tmp: tempfile::TempDir,
     root: PathBuf,
@@ -716,4 +718,280 @@ fn cli_project_overrides_gw_toml() {
 
     assert!(ticket_for(&json, "PROJ-42").is_null());
     assert_eq!(ticket_for(&json, "OTHER-7"), "OTHER-7");
+}
+
+// ---- machine-readable output for agents -----------------------------------
+
+/// stdout must hold exactly one JSON document, even when the command narrates.
+#[test]
+fn clean_json_writes_only_json_to_stdout() {
+    let fx = Fixture::new();
+    fx.add_worktree("PROJ-20");
+
+    let out = fx.gw(&["clean", "--dry-run", "--skip-github", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+    assert_eq!(json["applied"], serde_json::json!(false));
+}
+
+/// A script that asked for JSON can tell a plan from an execution.
+#[test]
+fn clean_json_reports_whether_the_plan_was_applied() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-21");
+    fx.publish("PROJ-21");
+
+    let planned = fx.gw(&["clean", "--skip-github", "--stale-days", "0", "--json"]);
+    assert_eq!(planned.code, 0, "stderr: {}", planned.stderr);
+    let json: serde_json::Value = serde_json::from_str(&planned.stdout).expect("valid json");
+    assert_eq!(json["applied"], serde_json::json!(false));
+    assert!(wt.is_dir(), "a JSON run without --yes removed a worktree");
+
+    let applied = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-github",
+        "--stale-days",
+        "0",
+        "--json",
+    ]);
+    assert_eq!(applied.code, 0, "stderr: {}", applied.stderr);
+    let json: serde_json::Value = serde_json::from_str(&applied.stdout).expect("valid json");
+    assert_eq!(json["applied"], serde_json::json!(true));
+    assert!(!wt.exists(), "--yes did not apply the plan");
+}
+
+#[test]
+fn add_json_reports_the_branch_and_path() {
+    let fx = Fixture::new();
+
+    let out = fx.gw(&["add", "PROJ-22", "--no-fetch", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["branch"], "PROJ-22");
+    assert_eq!(json["created"], json!(true));
+    assert!(json["path"]
+        .as_str()
+        .unwrap()
+        .ends_with("worktrees/PROJ-22"));
+
+    // Reusing an existing worktree is reported as not created.
+    let again = fx.gw(&["add", "PROJ-22", "--no-fetch", "--json"]);
+    assert_eq!(again.code, 0, "stderr: {}", again.stderr);
+    let json: serde_json::Value = serde_json::from_str(&again.stdout).expect("valid json");
+    assert_eq!(json["created"], json!(false));
+}
+
+/// `--print-path` is a stricter contract than JSON and wins over `--json`.
+#[test]
+fn add_print_path_beats_json() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["add", "PROJ-23", "--no-fetch", "--print-path", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.trim().ends_with("worktrees/PROJ-23"));
+}
+
+#[test]
+fn init_json_reports_the_created_layout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = source_repo(tmp.path());
+    let root = tmp.path().join("project");
+
+    let out = gw_raw(
+        tmp.path(),
+        &[
+            "init",
+            src.to_str().unwrap(),
+            "--dir",
+            root.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+    assert_eq!(json["created"], json!(true));
+    assert_eq!(json["branch"], "main");
+    assert!(json["checkout"]
+        .as_str()
+        .unwrap()
+        .ends_with("worktrees/main"));
+}
+
+#[test]
+fn init_json_dry_run_reports_no_checkout() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = source_repo(tmp.path());
+    let root = tmp.path().join("project");
+
+    let out = gw_raw(
+        tmp.path(),
+        &[
+            "init",
+            src.to_str().unwrap(),
+            "--dir",
+            root.to_str().unwrap(),
+            "--dry-run",
+            "--json",
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["created"], json!(false));
+    assert!(json["branch"].is_null());
+}
+
+/// Every command that documents `--json` must emit a parseable document with
+/// nothing else on stdout. This is the guard against a future command or a new
+/// progress line silently breaking the contract.
+#[test]
+fn every_documented_json_command_parses() {
+    let fx = Fixture::new();
+    fx.add_worktree("PROJ-30");
+
+    let cases: [(&str, &[&str]); 4] = [
+        ("status", &["status", "--json"]),
+        ("repos", &["repos", "--json"]),
+        ("clean", &["clean", "--json", "--skip-github"]),
+        ("add", &["add", "PROJ-31", "--no-fetch", "--json"]),
+    ];
+
+    for (name, args) in cases {
+        let out = fx.gw(args);
+        assert_eq!(out.code, 0, "{name}: stderr: {}", out.stderr);
+        serde_json::from_str::<serde_json::Value>(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{name} did not write one JSON document to stdout ({e}): {:?}",
+                out.stdout
+            )
+        });
+    }
+}
+
+/// A deleted branch's restore command is the only way back. It must still be
+/// reachable from a JSON run, just not on stdout.
+#[test]
+fn clean_json_moves_restore_hints_to_stderr() {
+    let fx = Fixture::new();
+    // Orphan branches are only deleted outside a worktree, so create a local
+    // branch with no checkout.
+    run(&fx.bare(), &["branch", "PROJ-32", "develop"]);
+    // `publish` pushes from the bare repo, which makes the tip reachable and
+    // therefore deletable.
+    fx.publish("PROJ-32");
+
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--delete-branches",
+        "--skip-github",
+        "--stale-days",
+        "0",
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value =
+        serde_json::from_str(&out.stdout).expect("stdout is one document");
+    assert!(
+        json["counts"]["to_delete"].as_u64().unwrap() >= 1,
+        "nothing was deleted, so the hint path was not exercised: {json}"
+    );
+    assert!(
+        out.stderr.contains("git branch PROJ-32"),
+        "restore hint lost in JSON mode: {}",
+        out.stderr
+    );
+}
+
+/// Exit 3 means partial destruction. The JSON body must still be emitted so
+/// the caller can see what succeeded and what did not.
+#[test]
+fn clean_json_emits_a_document_on_partial_failure() {
+    let fx = Fixture::new();
+    let locked = fx.add_worktree("PROJ-33");
+    let free = fx.add_worktree("PROJ-34");
+    fx.publish("PROJ-33");
+    fx.publish("PROJ-34");
+    // A locked worktree cannot be removed without --force, while its sibling
+    // is removable: one success, one failure.
+    run(&fx.bare(), &["worktree", "lock", locked.to_str().unwrap()]);
+
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-github",
+        "--stale-days",
+        "0",
+        "--json",
+    ]);
+    assert_eq!(
+        out.code, 3,
+        "expected a partial failure; stderr: {}",
+        out.stderr
+    );
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+    assert_eq!(json["applied"], json!(true));
+    assert!(!free.is_dir(), "the removable worktree survived");
+    assert!(locked.is_dir(), "the locked worktree was removed");
+}
+
+/// `--dry-run --yes` is still a dry run: the explicit refusal wins.
+#[test]
+fn clean_dry_run_beats_yes() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-35");
+    fx.publish("PROJ-35");
+
+    let out = fx.gw(&[
+        "clean",
+        "--dry-run",
+        "--yes",
+        "--skip-github",
+        "--stale-days",
+        "0",
+        "--json",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["applied"], json!(false));
+    assert!(wt.is_dir(), "dry run removed a worktree");
+}
+
+/// A plan with nothing to remove is still a valid document, and `applied`
+/// stays false because nothing ran.
+#[test]
+fn clean_json_with_an_empty_plan_still_parses() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["clean", "--skip-github", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["applied"], json!(false));
+    assert!(json["entries"].is_array());
+    assert!(json["counts"].is_object());
+}
+
+/// Warnings must not leak into stdout, however noisy the environment is.
+#[test]
+fn json_stdout_survives_lookup_failures() {
+    let fx = Fixture::new();
+    fx.add_worktree("PROJ-36");
+    // Point at a JIRA base URL and credentials that cannot resolve, and let
+    // the GitHub lookup run: both paths warn, neither may touch stdout.
+    let out = gw_with_env(
+        &fx.bare(),
+        &["clean", "--json", "--stale-days", "0"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_JIRA_BASE_URL", "https://127.0.0.1:1"),
+            ("GW_JIRA_PROJECT", "PROJ"),
+            ("GW_JIRA_USER", "user@example.com"),
+            ("GW_JIRA_API_TOKEN", "not-a-real-token"),
+            ("GW_SKIP_GITHUB", "1"),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str::<serde_json::Value>(&out.stdout)
+        .unwrap_or_else(|e| panic!("warning leaked into stdout ({e}): {:?}", out.stdout));
 }

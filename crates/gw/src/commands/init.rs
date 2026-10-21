@@ -10,7 +10,7 @@ use crate::output::Outcome;
 /// This is the one command that does not require an existing layout, so it does
 /// not go through `Context`. The repository, branch, and destination are all
 /// explicit instead of hardcoded.
-pub fn run(args: InitArgs) -> Result<Outcome, Error> {
+pub fn run(args: InitArgs, json: bool) -> Result<Outcome, Error> {
     let root = match args.dir {
         Some(dir) => dir,
         None => default_root(&args.remote, &crate::repos::repos_root())?,
@@ -38,15 +38,25 @@ pub fn run(args: InitArgs) -> Result<Outcome, Error> {
         )));
     }
 
-    println!("🏗  Creating worktree layout");
-    println!("   remote    : {}", args.remote);
-    println!("   root      : {}", root.display());
-    println!("   bare repo : {}", bare.display());
-    println!("   worktrees : {}", worktrees.display());
+    // JSON mode reserves stdout for the single result document.
+    if !json {
+        println!("🏗  Creating worktree layout");
+        println!("   remote    : {}", args.remote);
+        println!("   root      : {}", root.display());
+        println!("   bare repo : {}", bare.display());
+        println!("   worktrees : {}", worktrees.display());
+    }
 
     if args.dry_run {
-        println!();
-        println!("Dry run — nothing written. Re-run without --dry-run to create it.");
+        if json {
+            println!(
+                "{}",
+                to_json(&args.remote, &root, &bare, &worktrees, None, false)
+            );
+        } else {
+            println!();
+            println!("Dry run — nothing written. Re-run without --dry-run to create it.");
+        }
         return Ok(Outcome::ok());
     }
 
@@ -100,6 +110,21 @@ pub fn run(args: InitArgs) -> Result<Outcome, Error> {
         ],
     );
 
+    if json {
+        println!(
+            "{}",
+            to_json(
+                &args.remote,
+                &root,
+                &bare,
+                &worktrees,
+                Some((&branch, &checkout)),
+                true
+            )
+        );
+        return Ok(Outcome::ok());
+    }
+
     println!();
     println!("✅ Layout ready");
     println!();
@@ -111,6 +136,31 @@ pub fn run(args: InitArgs) -> Result<Outcome, Error> {
     println!("   gw add <branch>");
     println!("   gw clean --dry-run");
     Ok(Outcome::ok())
+}
+
+/// The stable machine-readable shape of `gw init`.
+fn to_json(
+    remote: &str,
+    root: &Path,
+    bare: &Path,
+    worktrees: &Path,
+    checkout: Option<(&str, &PathBuf)>,
+    created: bool,
+) -> String {
+    let mut doc = serde_json::json!({
+        "remote": remote,
+        "root": root.display().to_string(),
+        "bare": bare.display().to_string(),
+        "worktrees": worktrees.display().to_string(),
+        "branch": serde_json::Value::Null,
+        "checkout": serde_json::Value::Null,
+        "created": created,
+    });
+    if let Some((branch, path)) = checkout {
+        doc["branch"] = branch.into();
+        doc["checkout"] = path.display().to_string().into();
+    }
+    serde_json::to_string_pretty(&doc).unwrap_or_else(|_| "{}".into())
 }
 
 /// `owner/name` → `<repos>/owner/name`, `name` → `<repos>/name`.

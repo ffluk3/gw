@@ -95,10 +95,54 @@ The bare repository itself is not listed.
 | `last_commit_age_secs` | number or null | Newest commit across worktrees. |
 | `jira_projects` | array | Declared in that layout's `.gw.toml`. |
 
+## `gw add --json`
+
+```json
+{
+  "branch": "PROJ-123",
+  "path": "/repo/worktrees/PROJ-123",
+  "created": true
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `branch` | string | The branch that now has a worktree. |
+| `path` | string | Absolute path of the worktree. |
+| `created` | boolean | `false` when an existing worktree was reused. |
+
+`--print-path` overrides `--json`: it prints the bare path and nothing else,
+because the shell wrapper depends on that contract.
+
+## `gw init --json`
+
+```json
+{
+  "remote": "https://github.com/acme/widgets.git",
+  "root": "/home/me/repos/acme/widgets",
+  "bare": "/home/me/repos/acme/widgets/.bare",
+  "worktrees": "/home/me/repos/acme/widgets/worktrees",
+  "branch": "main",
+  "checkout": "/home/me/repos/acme/widgets/worktrees/main",
+  "created": true
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `remote` | string | The remote that was cloned. |
+| `root` | string | Absolute layout root. |
+| `bare` | string | Absolute path of the bare repository. |
+| `worktrees` | string | Absolute path of the worktrees directory. |
+| `branch` | string or null | First checkout. `null` on a dry run. |
+| `checkout` | string or null | Absolute path of the first checkout. `null` on a dry run. |
+| `created` | boolean | `false` on a dry run; nothing was written. |
+
 ## `gw clean --json`
 
 ```json
 {
+  "applied": false,
   "entries": [
     {
       "target": { "kind": "worktree", "path": "/repo/worktrees/PROJ-1", "branch": "PROJ-1" },
@@ -124,6 +168,10 @@ The bare repository itself is not listed.
   }
 }
 ```
+
+`applied` is `false` when the document is a plan and `true` when the plan ran.
+It is how a script tells a dry run from a destructive run; do not infer that
+from flags or the exit code.
 
 `target.kind` is `worktree` or `branch`.
 

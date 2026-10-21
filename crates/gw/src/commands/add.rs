@@ -31,6 +31,7 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
     let has_remote = ctx.git.remote_ref_exists(&branch)?;
 
     let strategy = add_strategy(existing, has_local, has_remote);
+    let created = !matches!(strategy, AddStrategy::UseExisting { .. });
 
     match strategy {
         AddStrategy::UseExisting { path } => {
@@ -72,7 +73,19 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
 
     let path = ctx.layout.worktree_path(&branch);
     if args.print_path {
+        // A bare path is a stricter contract than JSON ("the path and nothing
+        // else"); the shell wrapper depends on it, so it wins over --json.
         println!("{}", path.display());
+    } else if ctx.is_json() {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "branch": branch.as_str(),
+                "path": path.display().to_string(),
+                "created": created,
+            }))
+            .unwrap_or_else(|_| "{}".into())
+        );
     } else {
         println!("✅ Worktree ready at {}", path.display());
     }
