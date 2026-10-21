@@ -6,6 +6,21 @@ on:
   pull_request:
 
 jobs:
+  # The commit-msg hook catches bad messages locally. This job catches commits
+  # made with --no-verify, and commits authored outside the hook.
+  commit-messages:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Check the commits this branch adds, not the whole history. The base
+      # SHA is the merge target's tip at the time the pull request opened.
+      - name: Validate commit messages
+        run: ./scripts/check-commit-message.sh --range "${{ github.event.pull_request.base.sha }}..HEAD"
+
   test:
     strategy:
       fail-fast: false

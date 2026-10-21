@@ -83,10 +83,17 @@ mkdocs serve
 ## Development
 
 ```bash
+./scripts/install-hooks.sh    # once per clone: validate commit messages
 cargo test                    # unit, property, and real-git integration tests
 cargo clippy --all-targets
 cargo fmt --all -- --check
 ```
+
+Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+A `commit-msg` hook rejects messages that do not, and CI checks every commit in
+a pull request. The format decides the next release version, which
+release-plz computes from the history. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the rules and the release flow.
 
 The integration tests use real git repositories in a temporary directory. They
 do not use mocks, because the behavior that matters is the behavior of git.

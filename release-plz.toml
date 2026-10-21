@@ -1,0 +1,45 @@
+# Release configuration for release-plz.
+#
+# The version comes from commit messages, not from these settings. A push to
+# `main` updates the workspace version and the changelog in a pull request.
+# Merging that pull request tags the commit and publishes a GitHub release.
+#
+#   feat:          -> minor bump
+#   fix:           -> patch bump
+#   <type>!:       -> major bump
+#   BREAKING CHANGE footer -> major bump
+#   docs, test, ci, chore, ... -> no bump on their own
+#
+# `gw` is installed from source by `install.sh`, so it is never published to a
+# cargo registry. `git_only` makes release-plz read the current version from git
+# tags and skip `cargo publish`.
+
+[workspace]
+git_only = true
+changelog_update = true
+dependencies_update = false
+
+# Open the release pull request on every push to main. Merge it to release.
+release_always = false
+pr_labels = ["release"]
+
+# `gw` and `gw-core` share `[workspace.package].version` through
+# `version.workspace = true`, so release-plz updates one version for both and
+# keeps them in lockstep.
+
+[[package]]
+name = "gw"
+# gw-core is an internal crate, so its commits belong in the gw changelog.
+changelog_include = ["gw-core"]
+git_tag_enable = true
+git_release_enable = true
+# Create `v0.2.0`, not `gw-v0.2.0`. The tag names the release for the whole
+# CLI, not for one crate.
+git_tag_name = "v{{ version }}"
+
+[[package]]
+name = "gw-core"
+# gw-core ships only as a dependency of gw. Do not tag or release it on its
+# own. Its commits still reach the gw changelog through changelog_include.
+git_tag_enable = false
+git_release_enable = false
