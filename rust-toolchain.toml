@@ -1,0 +1,6 @@
+# Pin the toolchain so local and CI lints cannot drift. A newer clippy can
+# promote a style lint into an error that the pinned version did not yet have.
+[toolchain]
+channel = "1.87.0"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

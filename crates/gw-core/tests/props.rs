@@ -31,7 +31,7 @@ impl Rng {
     }
 
     fn bool(&mut self) -> bool {
-        self.next() % 2 == 0
+        self.next().is_multiple_of(2)
     }
 }
 

@@ -18,6 +18,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
+          toolchain: "1.87.0"
           components: clippy, rustfmt
 
       - name: Format
