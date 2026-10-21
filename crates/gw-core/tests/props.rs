@@ -1,0 +1,357 @@
+//! Safety invariants, checked over generated states.
+//!
+//! These are the properties the tool must never violate regardless of what the
+//! repository looks like. They are stated positively ("never destroys X unless
+//! Y held") so a counterexample names the exact fact that was ignored.
+
+use gw_core::classify::classify_clean;
+use gw_core::{
+    Activity, ActivitySource, BranchName, BranchSnapshot, Decision, Dirty, Layout, Policy,
+    ReachableSet, RepoSnapshot, Sha, Target, TicketStatus, WorktreeKind, WorktreeSnapshot,
+};
+use std::path::PathBuf;
+
+/// Small deterministic generator: enough entropy to explore interactions, and
+/// no dev-dependency for a fixture this simple.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        // xorshift64*
+        self.0 ^= self.0 >> 12;
+        self.0 ^= self.0 << 25;
+        self.0 ^= self.0 >> 27;
+        self.0.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    fn pick<'a, T>(&mut self, items: &'a [T]) -> &'a T {
+        &items[(self.next() % items.len() as u64) as usize]
+    }
+
+    fn bool(&mut self) -> bool {
+        self.next() % 2 == 0
+    }
+}
+
+fn sha_for(n: u64) -> Sha {
+    // 40 hex characters, deterministic per index.
+    Sha::parse(&format!("{n:040x}")).expect("valid sha")
+}
+
+fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
+    // A fixed pool of "remote-reachable" commits that some branches point at.
+    let reachable: Vec<Sha> = (0..4).map(sha_for).collect();
+    let unpublished: Vec<Sha> = (100..104).map(sha_for).collect();
+
+    let kinds = [
+        WorktreeKind::Linked,
+        WorktreeKind::Harness,
+        WorktreeKind::Prunable,
+    ];
+    let dirty_states = [Dirty::Clean, Dirty::Dirty, Dirty::Unknown];
+
+    let count = (rng.next() % 5) as usize;
+    let mut worktrees = Vec::new();
+    let mut protected = std::collections::BTreeSet::new();
+
+    for i in 0..count {
+        let branch = BranchName::parse(&format!("AX-{i}")).unwrap();
+        let is_protected = rng.bool();
+        if is_protected {
+            protected.insert(branch.clone());
+        }
+        let head = if rng.bool() {
+            Some(rng.pick(&reachable).clone())
+        } else {
+            Some(rng.pick(&unpublished).clone())
+        };
+        let age_days = (rng.next() % 30) as i64;
+        worktrees.push(WorktreeSnapshot {
+            path: PathBuf::from(format!("/repo/worktrees/AX-{i}")),
+            branch: Some(branch),
+            head,
+            kind: *rng.pick(&kinds),
+            dirty: *rng.pick(&dirty_states),
+            activity: Activity {
+                age_secs: age_days * day,
+                source: *rng.pick(&[ActivitySource::CommitDate, ActivitySource::Unknown]),
+            },
+            ticket: if rng.bool() {
+                TicketStatus::Closed {
+                    resolution: Some("Done".into()),
+                }
+            } else {
+                TicketStatus::NotChecked
+            },
+            merged_pr: rng.bool(),
+        });
+    }
+
+    let mut orphan_count = (rng.next() % 4) as usize;
+    let mut orphans = Vec::new();
+    while orphan_count > 0 {
+        orphan_count -= 1;
+        let i = rng.next() % 8;
+        let branch = BranchName::parse(&format!("ORPHAN-{i}")).unwrap();
+        let is_protected = rng.bool();
+        if is_protected {
+            protected.insert(branch.clone());
+        }
+        orphans.push(BranchSnapshot {
+            name: branch,
+            worktree: None,
+            tip: Some(if rng.bool() {
+                rng.pick(&reachable).clone()
+            } else {
+                rng.pick(&unpublished).clone()
+            }),
+            commit_age_secs: Some((rng.next() % 30) as i64 * day),
+        });
+    }
+
+    // Every worktree branch is protected from ref deletion, but only the
+    // default branch is protected from worktree removal.
+    // (worktree branches are already in `protected`)
+    for wt in &worktrees {
+        if let Some(branch) = &wt.branch {
+            protected.insert(branch.clone());
+        }
+    }
+
+    let snap = RepoSnapshot {
+        layout: Layout::new(PathBuf::from("/repo")),
+        default_branch: Some(BranchName::parse("develop").unwrap()),
+        head_branch: Some(BranchName::parse("develop").unwrap()),
+        protected,
+        reachable: ReachableSet::new(reachable),
+        worktrees,
+        orphans,
+    };
+    (snap, unpublished)
+}
+
+fn policy() -> Vec<Policy> {
+    vec![
+        Policy::default(),
+        Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        },
+        Policy {
+            delete_branches: false,
+            ..Policy::default()
+        },
+        Policy {
+            stale_after_secs: 0,
+            ..Policy::default()
+        },
+        Policy {
+            dry_run: true,
+            ..Policy::default()
+        },
+    ]
+}
+
+fn run(seed: u64, day: i64, policy_index: usize) -> (RepoSnapshot, gw_core::Plan) {
+    let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let (snap, _) = snapshot(&mut rng, day);
+    let policies = policy();
+    let p = policies[policy_index % policies.len()].clone();
+    let plan = classify_clean(&snap, &p);
+    (snap, plan)
+}
+
+const DAY: i64 = 86_400;
+
+#[test]
+fn never_removes_a_dirty_or_unreadable_worktree() {
+    for seed in 0..200 {
+        for pi in 0..5 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in plan.entries.iter() {
+                if !matches!(decision, Decision::Remove { .. }) {
+                    continue;
+                }
+                let Target::Worktree { path, .. } = target else {
+                    continue;
+                };
+                let wt = snap
+                    .worktrees
+                    .iter()
+                    .find(|w| &w.path == path)
+                    .expect("plan targets a known worktree");
+                assert_eq!(
+                    wt.dirty,
+                    Dirty::Clean,
+                    "seed={seed} policy={pi} removed {path:?} without a clean status"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn never_removes_unpublished_commits() {
+    for seed in 0..200 {
+        for pi in 0..5 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in plan.entries.iter() {
+                if !matches!(decision, Decision::Remove { .. }) {
+                    continue;
+                }
+                let Target::Worktree { path, .. } = target else {
+                    continue;
+                };
+                let wt = snap
+                    .worktrees
+                    .iter()
+                    .find(|w| &w.path == path)
+                    .expect("known worktree");
+                let head = wt.head.as_ref().expect("removal requires a known head");
+                assert!(
+                    snap.reachable.contains(head),
+                    "seed={seed} policy={pi} removed {path:?} while its tip was unpublished"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn never_removes_a_protected_branch() {
+    for seed in 0..200 {
+        for pi in 0..5 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in plan.entries.iter() {
+                if !matches!(decision, Decision::Remove { .. }) {
+                    continue;
+                }
+                let branch = target.branch_name().expect("removal has a branch");
+                assert!(
+                    !snap.is_worktree_protected(branch),
+                    "seed={seed} policy={pi} removed protected branch {branch}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn never_touches_the_harness_worktrees() {
+    for seed in 0..200 {
+        for pi in 0..5 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in plan.entries.iter() {
+                if !decision.is_destructive() {
+                    continue;
+                }
+                let Target::Worktree { path, .. } = target else {
+                    continue;
+                };
+                let wt = snap.worktrees.iter().find(|w| &w.path == path).unwrap();
+                assert_ne!(
+                    wt.kind,
+                    WorktreeKind::Harness,
+                    "seed={seed} policy={pi} planned destruction of a harness worktree"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn never_deletes_branches_unless_enabled() {
+    let no_delete = Policy {
+        delete_branches: false,
+        ..Policy::default()
+    };
+    for seed in 0..200 {
+        let mut rng = Rng((seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let (snap, _) = snapshot(&mut rng, DAY);
+        let plan = classify_clean(&snap, &no_delete);
+        for (_, decision) in plan.entries.iter() {
+            assert!(
+                !matches!(decision, Decision::Delete { .. }),
+                "seed={seed} deleted a branch with delete_branches disabled"
+            );
+        }
+    }
+}
+
+#[test]
+fn never_deletes_a_protected_or_unpublished_branch() {
+    for seed in 0..200 {
+        for pi in 0..5 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in plan.entries.iter() {
+                let Decision::Delete { tip, .. } = decision else {
+                    continue;
+                };
+                let Target::Branch { name } = target else {
+                    panic!("Delete must target a branch, got {target:?}");
+                };
+                assert!(
+                    !snap.is_protected(name),
+                    "seed={seed} policy={pi} deleted protected branch {name}"
+                );
+                assert!(
+                    snap.reachable.contains(tip),
+                    "seed={seed} policy={pi} deleted {name} with unpublished tip"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn classification_is_deterministic() {
+    for seed in 0..50 {
+        let (_, a) = run(seed, DAY, 0);
+        let (_, b) = run(seed, DAY, 0);
+        assert_eq!(a, b, "seed={seed} produced different plans across runs");
+    }
+}
+
+#[test]
+fn closed_tickets_are_only_removed_when_opted_in() {
+    for seed in 0..200 {
+        let mut rng = Rng((seed as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+        let (snap, _) = snapshot(&mut rng, DAY);
+        let plan = classify_clean(&snap, &Policy::default());
+        for (target, decision) in plan.entries.iter() {
+            let Target::Worktree { path, .. } = target else {
+                continue;
+            };
+            let wt = snap.worktrees.iter().find(|w| &w.path == path).unwrap();
+            if wt.ticket.closed_resolution().is_none() {
+                continue;
+            }
+            // With a closed ticket and no opt-in, the only legitimate removals
+            // are ones justified by a stronger, already-enabled reason.
+            if matches!(decision, Decision::Remove { .. }) {
+                let justified = wt.merged_pr || wt.activity.age_secs >= 7 * DAY;
+                assert!(
+                    justified,
+                    "seed={seed} removed a closed-ticket worktree without --closed and no other reason"
+                );
+            }
+            // A closed ticket only reaches the ticket rule once every
+            // protective and stronger signal has been cleared: clean, known
+            // head that is published, not merged, and not stale. In that state
+            // and without the opt-in it must surface as a recommendation.
+            let reaches_ticket_rule = wt.kind == WorktreeKind::Linked
+                && !snap.is_worktree_protected(wt.branch.as_ref().expect("linked has a branch"))
+                && wt.dirty == Dirty::Clean
+                && wt.head.as_ref().is_some_and(|h| snap.reachable.contains(h))
+                && !wt.merged_pr
+                && !(wt.activity.source != ActivitySource::Unknown
+                    && wt.activity.age_secs >= 7 * DAY);
+            if reaches_ticket_rule {
+                assert!(
+                    decision.is_recommendation(),
+                    "seed={seed} closed ticket produced {decision:?} instead of a recommendation"
+                );
+            }
+        }
+    }
+}

@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/gw-core", "crates/gw"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.87"
+license = "MIT"
+description = "Git worktree manager for bare-repo layouts"
+repository = "https://github.com/ffluk3/gw"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+gw-core = { path = "crates/gw-core" }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
