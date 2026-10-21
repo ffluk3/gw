@@ -114,7 +114,7 @@ the project keys declared in that layout's `.gw.toml`.
 
 ## Shell integration
 
-`shell/gw.sh` defines:
+`gw.sh` defines:
 
 | Function | Behavior |
 | --- | --- |
@@ -124,3 +124,7 @@ the project keys declared in that layout's `.gw.toml`.
 
 Source it from your shell profile. The script returns early if `gw` is not on
 `PATH`.
+
+The installer copies the file to
+`${XDG_DATA_HOME:-~/.local/share}/gw/gw.sh`. A source install leaves the
+original at `shell/gw.sh` in the checkout as well.

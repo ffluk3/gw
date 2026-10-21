@@ -47,7 +47,7 @@ jobs:
 
       - name: Shellcheck
         if: runner.os == 'Linux'
-        run: shellcheck install.sh shell/gw.sh
+        run: shellcheck install.sh shell/gw.sh scripts/*.sh
 
   build:
     runs-on: ubuntu-latest
