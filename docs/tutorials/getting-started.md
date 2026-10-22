@@ -52,8 +52,8 @@ warning.
     ./install.sh --from-source
     ```
 
-Then add the shell integration. This step gives you `gwadd`, which opens a
-worktree and changes into it:
+Then add the shell integration. This step gives you `gwadd` and `gw add --cd`,
+which open a worktree and change into it:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc

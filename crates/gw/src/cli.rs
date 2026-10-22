@@ -125,6 +125,19 @@ pub struct AddArgs {
     #[arg(long)]
     pub print_path: bool,
 
+    /// Change the calling shell into the new worktree.
+    ///
+    /// A process cannot change its parent shell's directory, so the shell
+    /// integration acts on this flag. Run standalone, `gw` prints the path
+    /// and nothing else, exactly like `--print-path`.
+    #[arg(long, overrides_with = "no_cd")]
+    pub cd: bool,
+
+    /// Stay in the current directory, even when the shell integration or
+    /// `GW_CD=1` would otherwise change into the worktree.
+    #[arg(long, overrides_with = "cd")]
+    pub no_cd: bool,
+
     /// Do not fetch from origin first.
     #[arg(long)]
     pub no_fetch: bool,

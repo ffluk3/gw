@@ -62,8 +62,20 @@ Create or reuse a worktree.
 | Option | Meaning |
 | --- | --- |
 | `--print-path` | Print the worktree path only. Used by the shell wrapper. Overrides `--json`. |
+| `--cd` | Change the calling shell into the worktree. Needs the shell integration. |
+| `--no-cd` | Stay in the current directory. Overrides `GW_CD=1` and the last of the `--cd` pair wins. |
 | `--no-fetch` | Do not fetch from origin first. |
 | `--json` | Machine-readable result, including whether the worktree was created. |
+
+`--cd` cannot be performed by the binary: a process cannot change its parent
+shell's directory. Run standalone, `gw add --cd` prints the bare path, exactly
+like `--print-path`, and nothing else. The `gw` shell function from
+[Shell integration](#shell-integration) reads that path and performs the `cd`.
+Set `GW_CD=1` to make a bare `gw add` navigate as well; `--no-cd` opts out.
+
+`--cd` and `--no-cd` override each other, so the last one on the command line
+wins. Both override `--json` the same way `--print-path` does, because a shell
+function must receive the path and nothing else.
 
 Strategy selection:
 
@@ -122,12 +134,18 @@ the project keys declared in that layout's `.gw.toml`.
 
 | Function | Behavior |
 | --- | --- |
-| `gwadd <branch>` | `gw add --print-path`, then `cd` into the result. |
+| `gw` | Runs `gw`. For `gw add --cd` (or `GW_CD=1`), it `cd`s into the worktree afterwards. |
+| `gwadd <branch>` | `gw add --cd <branch>`: create or reuse the worktree, then `cd` into it. |
 | `gwstatus` | `gw status "$@"` |
 | `gwclean` | `gw clean "$@"` |
 
 Source it from your shell profile. The script returns early if `gw` is not on
 `PATH`.
+
+The `gw` function shadows the binary so it can `cd` in your shell. It passes
+every argument through unchanged. It only navigates for `add`, and only when
+`--cd` is given or `GW_CD=1` is set; `--no-cd` turns navigation off for that
+one call. `gwclean` and `gwstatus` always call the binary directly.
 
 The installer copies the file to
 `${XDG_DATA_HOME:-~/.local/share}/gw/gw.sh`. A source install leaves the

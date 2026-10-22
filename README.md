@@ -38,7 +38,7 @@ cd gw
 ```
 
 Either way `gw` lands in `~/.local/bin`. Then add the shell integration, which
-provides `gwadd`:
+provides `gwadd` and makes `gw add --cd` change into the new worktree:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc

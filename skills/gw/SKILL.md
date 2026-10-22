@@ -125,6 +125,9 @@ Safety rules for agents:
 
 - `gw add` has no JSON mode. `--json` on `gw add` still prints prose; use
   `--print-path` and capture stdout only.
+- `gw add --cd` is for interactive shells only. It prints the bare path and
+  relies on the sourced `gw` function to `cd`; a non-interactive tool call
+  gets no navigation from it, so use `--print-path` instead.
 - Some releases print a human progress line to stdout before the
   `gw clean --json` document. If `jq` cannot parse the stream, strip
   everything before the first `{`:

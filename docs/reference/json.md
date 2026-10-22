@@ -112,7 +112,9 @@ The bare repository itself is not listed.
 | `created` | boolean | `false` when an existing worktree was reused. |
 
 `--print-path` overrides `--json`: it prints the bare path and nothing else,
-because the shell wrapper depends on that contract.
+because the shell wrapper depends on that contract. `--cd` does the same,
+because the shell function that performs the `cd` must receive the path and
+nothing else.
 
 ## `gw init --json`
 

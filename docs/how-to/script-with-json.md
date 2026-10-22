@@ -70,7 +70,8 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
 { "branch": "PROJ-123", "path": "/repo/worktrees/PROJ-123", "created": true }
 ```
 
-`--print-path` overrides `--json` and prints the bare path.
+`--print-path` overrides `--json` and prints the bare path. `--cd` does the
+same, because the shell function that performs the `cd` consumes that output.
 
 ### `gw init --json`
 

@@ -792,6 +792,44 @@ fn add_print_path_beats_json() {
     assert!(out.stdout.trim().ends_with("worktrees/PROJ-23"));
 }
 
+/// The binary cannot change its parent shell's directory, so `--cd` must hand
+/// the shell the bare path the wrapper `cd`s into. Anything else on stdout
+/// would be pasted into `cd`.
+#[test]
+fn add_cd_prints_only_the_path() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["add", "PROJ-24", "--no-fetch", "--cd", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    // One line, absolute, and nothing else. Compare the suffix because the
+    // temp root may resolve through a symlink (`/var` on macOS).
+    assert_eq!(out.stdout.lines().count(), 1, "output: {}", out.stdout);
+    assert_eq!(out.stdout.trim(), out.stdout.trim_end_matches('\n'));
+    assert!(
+        out.stdout.trim().starts_with('/'),
+        "not absolute: {}",
+        out.stdout
+    );
+    assert!(out.stdout.trim().ends_with("worktrees/PROJ-24"));
+}
+
+/// `--no-cd` opts out of a `GW_CD=1` default or a shell alias, and the last
+/// of the pair wins when both are given.
+#[test]
+fn add_no_cd_restores_normal_output() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["add", "PROJ-25", "--no-fetch", "--cd", "--no-cd"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("Worktree ready at"),
+        "unexpected output: {}",
+        out.stdout
+    );
+
+    let out = fx.gw(&["add", "PROJ-25", "--no-fetch", "--no-cd", "--cd"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.trim().ends_with("worktrees/PROJ-25"));
+}
+
 #[test]
 fn init_json_reports_the_created_layout() {
     let tmp = tempfile::tempdir().unwrap();

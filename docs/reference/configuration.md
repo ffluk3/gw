@@ -36,6 +36,7 @@ All variables are optional.
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `GW_REPO` | Layout root, `.bare` path, `owner/name`, or unique name. Same as `--repo`. | discovery from cwd |
+| `GW_CD` | Set to `1` to make a bare `gw add` change the shell's directory. Read by the shell integration, not the binary. | — |
 | `GW_REPOS_ROOT` | Directory that holds layouts. A leading `~/` is expanded. | `~/repos` |
 | `GW_STALE_DAYS` | Stale limit in days. | `7` |
 | `GW_PROTECT` | Comma-separated branch names that must never be deleted. | — |

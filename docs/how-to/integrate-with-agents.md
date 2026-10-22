@@ -53,8 +53,9 @@ download to a tag when the binary is pinned to a release.
 - Confirm the directory is inside a layout with `gw status --json`; do not
   treat a normal clone as one.
 - Get a checkout with `gw add --print-path <branch>` and use the returned
-  absolute path. Do not use `gwadd`, because a `cd` in a child process does not
-  survive.
+  absolute path. Do not use `gwadd` or `--cd`, because a `cd` in a child
+  process does not survive, and the shell function that performs it is not
+  available to a non-interactive tool call.
 - Read state from `gw status --json` and `gw repos --json`, never from tables.
 - Preview with `gw clean --dry-run --json`, and apply `--yes` only with human
   approval. A piped `gw clean` is a dry run by default, so an unattended agent

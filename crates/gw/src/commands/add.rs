@@ -72,9 +72,13 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
     }
 
     let path = ctx.layout.worktree_path(&branch);
-    if args.print_path {
+    if args.print_path || args.cd {
         // A bare path is a stricter contract than JSON ("the path and nothing
         // else"); the shell wrapper depends on it, so it wins over --json.
+        //
+        // --cd means the same thing to the binary: it cannot change the
+        // caller's directory, so it hands the path to the shell function that
+        // performs the `cd`.
         println!("{}", path.display());
     } else if ctx.is_json() {
         println!(
