@@ -20,6 +20,25 @@ gw clean --yes
 when stdout is a terminal and `--json` is absent. A piped run, a scripted run,
 or a JSON run stays a dry run.
 
+## Choose which worktrees to remove
+
+```bash
+gw clean --interactive
+```
+
+1. Read the table that `gw` prints.
+2. Use the arrow keys to move in the list.
+3. Press Space to mark a row.
+4. Press Enter to apply the marked rows, or Esc to cancel.
+
+The list has no marked rows at the start. The list contains only rows that
+`gw` can act on, and it includes worktrees with a closed ticket. `gw` never
+offers a dirty, unpublished, protected, or recently active worktree.
+
+`--interactive` needs a terminal. It cannot be used with `--yes`, `--json`, or
+`--delete-branches`. If you mark a `prune` row, `gw` drops the metadata of all
+prunable worktrees, not only that row.
+
 ## Change the stale limit
 
 The default stale limit is 7 days after the last commit. To change it for one

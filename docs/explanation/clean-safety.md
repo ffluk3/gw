@@ -97,6 +97,16 @@ default follows whether a human is present to watch the run. The gate admits a
 plan with any planned work, including a prune-only plan that destroys nothing.
 The `Dry run — nothing changed` notice prints only when `--yes` was absent.
 
+`--interactive` is a second way to admit a plan. The person at the terminal
+chooses rows from a list, and that choice is the confirmation, so `gw` does
+not ask again. It is a policy override only. A person can pick a worktree whose
+ticket is closed without passing `--closed`, but the list offers only rows that
+the classifier already marked as `remove`, `prune`, `delete`, or recommended.
+Rows that are protected, dirty, unpublished, or otherwise kept are not in the
+list, and a selection that names one is refused. The order of checks above does
+not change. `--interactive` needs a terminal on stdin and stdout, so it cannot
+combine with `--yes` or `--json`, and it never falls back to a dry run.
+
 `--json` counts as "no human present", even when stdout is a terminal. An agent
 harness can allocate a pty, and a terminal is not proof that someone is
 watching. Machine output is a request for a report, not a confirmation.

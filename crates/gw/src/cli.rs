@@ -207,6 +207,15 @@ pub struct CleanArgs {
     #[arg(long)]
     pub delete_branches: bool,
 
+    /// Choose which worktrees to act on from a list.
+    ///
+    /// Overrides policy only: you can pick a worktree whose ticket is closed
+    /// without --closed, but never one that is dirty, unpublished, protected,
+    /// or otherwise kept. Needs a terminal on stdin and stdout. Conflicts with
+    /// --yes, and is a usage error with --json or --delete-branches.
+    #[arg(long, short = 'i', conflicts_with = "yes")]
+    pub interactive: bool,
+
     /// Days since the last commit before a worktree is stale.
     ///
     /// When absent, `[clean] stale_after` from `.gw.toml` applies, and when

@@ -10,6 +10,7 @@ mod git;
 mod output;
 mod providers;
 mod repos;
+mod select_ui;
 mod settings;
 
 use clap::Parser;

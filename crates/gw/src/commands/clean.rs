@@ -13,6 +13,7 @@ use crate::error::Error;
 use crate::git::GitBackend;
 use crate::output::Outcome;
 use crate::providers::Limits;
+use crate::select_ui;
 
 use super::snapshot;
 
@@ -31,7 +32,41 @@ fn resolve_stale_after_secs(ctx: &Context, args: &CleanArgs) -> i64 {
     Policy::default().stale_after_secs
 }
 
+/// Reject invocations where a prompt cannot run or would be ambiguous.
+///
+/// Pure so the truth table is testable; `run` passes in the terminal facts.
+fn validate(args: &CleanArgs, json: bool, stdin_tty: bool, stdout_tty: bool) -> Result<(), Error> {
+    if !args.interactive {
+        return Ok(());
+    }
+    if json {
+        return Err(Error::Usage(
+            "--interactive cannot be combined with --json; use --dry-run --json or --yes --json for scripts"
+                .into(),
+        ));
+    }
+    if args.delete_branches {
+        return Err(Error::Usage(
+            "--interactive selects worktrees only; run without --delete-branches".into(),
+        ));
+    }
+    if !stdin_tty || !stdout_tty {
+        return Err(Error::Usage(
+            "--interactive needs a terminal on stdin and stdout; use --dry-run or --yes for scripts"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
+    validate(
+        &args,
+        ctx.is_json(),
+        std::io::stdin().is_terminal(),
+        std::io::stdout().is_terminal(),
+    )?;
+
     let policy = Policy {
         stale_after_secs: resolve_stale_after_secs(ctx, &args),
         clean_closed_tickets: args.closed,
@@ -89,17 +124,38 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         snapshot::attach_tickets(&mut snap, &ctx.convention, &observations);
     }
 
-    let plan = classify_clean(&snap, &policy);
-    let apply = should_apply(&args, &plan, ctx.is_json());
+    let mut plan = classify_clean(&snap, &policy);
 
     if !ctx.is_json() {
         if plan.is_empty() {
             println!("(no worktrees)");
         } else {
             print!("{}", render_table(&plan));
-            print_recommendations(ctx, &plan);
+            // Interactive mode offers these rows in the prompt instead.
+            if !args.interactive {
+                print_recommendations(ctx, &plan);
+            }
         }
     }
+
+    if args.interactive {
+        if args.dry_run {
+            if !plan.is_empty() {
+                println!();
+                println!("Dry run — nothing changed. Re-run without --dry-run to choose.");
+            }
+            return Ok(Outcome::ok());
+        }
+        // The selection is the confirmation; everything after this point sees
+        // only the rows the user picked.
+        plan = select_ui::pick(&plan, &select_ui::TerminalSelector)?;
+        if plan.is_empty() {
+            println!("Nothing selected — nothing changed.");
+            return Ok(Outcome::ok());
+        }
+    }
+
+    let apply = should_apply(&args, &plan, ctx.is_json());
 
     if !apply {
         if ctx.is_json() {
@@ -160,6 +216,10 @@ fn should_apply(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
     }
     if args.dry_run {
         return false;
+    }
+    if args.interactive {
+        // The selection already happened and is the confirmation.
+        return true;
     }
     if args.yes {
         return true;
@@ -340,6 +400,7 @@ mod tests {
             yes,
             closed: false,
             delete_branches: false,
+            interactive: false,
             stale_days: Some(7),
         }
     }
@@ -386,6 +447,63 @@ mod tests {
                 },
             )],
         }
+    }
+
+    fn interactive_args() -> CleanArgs {
+        CleanArgs {
+            interactive: true,
+            ..args(false, false)
+        }
+    }
+
+    #[test]
+    fn validate_ignores_non_interactive_runs() {
+        assert!(validate(&args(false, false), true, false, false).is_ok());
+    }
+
+    #[test]
+    fn validate_truth_table_for_interactive() {
+        assert!(validate(&interactive_args(), false, true, true).is_ok());
+        assert!(matches!(
+            validate(&interactive_args(), true, true, true),
+            Err(Error::Usage(_))
+        ));
+        assert!(matches!(
+            validate(&interactive_args(), false, false, true),
+            Err(Error::Usage(m)) if m.contains("terminal")
+        ));
+        assert!(matches!(
+            validate(&interactive_args(), false, true, false),
+            Err(Error::Usage(m)) if m.contains("terminal")
+        ));
+        let with_branches = CleanArgs {
+            delete_branches: true,
+            ..interactive_args()
+        };
+        assert!(matches!(
+            validate(&with_branches, false, true, true),
+            Err(Error::Usage(m)) if m.contains("--delete-branches")
+        ));
+    }
+
+    #[test]
+    fn interactive_admits_a_filtered_plan_but_not_an_empty_or_dry_one() {
+        assert!(should_apply(
+            &interactive_args(),
+            &destructive_plan(),
+            false
+        ));
+        assert!(!should_apply(
+            &interactive_args(),
+            &non_destructive_plan(),
+            false
+        ));
+        assert!(!should_apply(&interactive_args(), &Plan::new(), false));
+        let dry = CleanArgs {
+            dry_run: true,
+            ..interactive_args()
+        };
+        assert!(!should_apply(&dry, &destructive_plan(), false));
     }
 
     #[test]

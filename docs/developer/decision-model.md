@@ -47,6 +47,15 @@ plan with real work, so `--yes` can apply a prune-only plan.
 but that the current policy does not enable. It destroys nothing, so it needs
 no restore data.
 
+Interactive selection is a pure filter after classification, in
+`gw-core::select`. It never re-runs the rules. `Keep` and `Skip` rows are not
+selectable, and a selection that names one is an error. A `Recommend` on a
+worktree is promoted to `Remove` with the same reason; this needs no restore
+data because removing a worktree directory destroys no ref. Selection never
+constructs a `Delete`, so the tip stays tied to the code that has it. The
+terminal widget sits behind a `Selector` trait in the adapter, so none of this
+needs a terminal to test.
+
 ## Why `Unknown` is a value, not a default
 
 Each fact that `gw` could not observe is explicit. A missing cleanliness probe
