@@ -73,6 +73,8 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
 
 `--print-path` overrides `--json` and prints the bare path. `--cd` does the
 same, because the shell function that changes the directory uses that output.
+In a script, always use `--print-path`; a script has no interactive shell
+function to act on `--cd`.
 
 ### `gw init --json`
 

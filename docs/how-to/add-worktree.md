@@ -5,35 +5,31 @@ Use this guide to get a checkout for a branch.
 ## Open a worktree and enter it
 
 ```bash
-gw add --cd PROJ-1234
+gw add PROJ-1234
 ```
 
-`--cd` works only when the shell integration is sourced. The `gw` shell
-function from that file changes into the result. Without it, the binary prints
-the path and your shell stays where it is, because no process can change the
-directory of its parent.
+With the shell integration sourced, `gw add` changes into the new worktree.
+The `gw` shell function from that file performs the `cd`. Without the
+integration, the binary prints the path and your shell stays where it is,
+because no process can change the directory of its parent.
 
-To make each `gw add` change directory, set the default one time:
-
-```bash
-export GW_CD=1
-```
-
-Then `gw add PROJ-1234` enters the worktree. Use `--no-cd` for one call that
-must stay in the current directory.
+`--cd` says the same thing. It is useful only to override `GW_CD=0`.
 
 ## Open a worktree without changing directory
 
 ```bash
-gw add PROJ-1234
+gw add PROJ-1234 --no-cd
 ```
 
-The command prints the path and your shell stays where it is. If `GW_CD=1` is
-set, add `--no-cd` to that call. To capture only the path:
+The `--no-cd` flag wins over everything else for one call. To make staying put
+the default, set `GW_CD=0` in your shell profile. To capture only the path:
 
 ```bash
-path="$(gw add --print-path PROJ-1234)"
+worktree="$(gw add --print-path PROJ-1234)"
 ```
+
+Do not name that variable `path` in zsh. zsh ties `path` to `PATH`, so the
+assignment also replaces your command search path.
 
 ## Understand the four cases
 

@@ -143,14 +143,16 @@ pub struct AddArgs {
 
     /// Change the calling shell into the new worktree.
     ///
-    /// A process cannot change its parent shell's directory, so the shell
-    /// integration acts on this flag. Run standalone, `gw` prints the path
-    /// and nothing else, exactly like `--print-path`.
+    /// With the shell integration sourced this is already the default, so the
+    /// flag is only needed to override `GW_CD=0`. A process cannot change its
+    /// parent shell's directory, so the shell function acts on this flag. Run
+    /// standalone, `gw` prints the path and nothing else, like `--print-path`.
     #[arg(long, overrides_with = "no_cd")]
     pub cd: bool,
 
-    /// Stay in the current directory, even when the shell integration or
-    /// `GW_CD=1` would otherwise change into the worktree.
+    /// Stay in the current directory instead of entering the new worktree.
+    ///
+    /// This wins over the default, over `--cd`, and over `GW_CD`.
     #[arg(long, overrides_with = "cd")]
     pub no_cd: bool,
 

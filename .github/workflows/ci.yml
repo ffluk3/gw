@@ -66,6 +66,15 @@ jobs:
         if: runner.os == 'Linux'
         run: shellcheck install.sh shell/gw.sh scripts/*.sh
 
+      # The wrapper must work in zsh as well as bash, and zsh ties `path` to
+      # `PATH`, which turns an ordinary `local path` into an emptied PATH.
+      # Only a real zsh catches that, so run the cases in both shells.
+      - name: Shell integration
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zsh
+          ./scripts/test-shell-integration.sh target/debug/gw
+
   build:
     runs-on: ubuntu-latest
     steps:

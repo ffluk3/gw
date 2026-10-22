@@ -194,7 +194,7 @@ These variables have no file spelling, by design:
 | `GW_JIRA_USER`, `GW_JIRA_API_TOKEN` | Credentials. They stay in the environment so they are never written to a file that might be shared or committed. |
 | `GW_REPO` | A per-invocation locator. `gw` must resolve it before it can find the layout, and therefore before it can read the layout file. |
 | `GW_CONFIG`, `GW_NO_GLOBAL_CONFIG` | They select which configuration file to read, so they cannot be stored inside one. |
-| `GW_CD` | Read by the shell integration in `shell/gw.sh`, not by the `gw` binary. |
+| `GW_CD` | Read by the shell integration in `shell/gw.sh`, not by the `gw` binary. `0` makes `gw add` stay in the current directory; `1` is the default behavior and enters the worktree. |
 | `NO_COLOR` | Presentation only. It never changes a decision or the JSON shape, so a team has nothing to agree on. The flag is `--no-color`. |
 
 `GW_REPOS_ROOT` and `[discovery] repos_root` are the same setting. The file

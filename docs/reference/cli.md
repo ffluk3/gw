@@ -61,8 +61,8 @@ Make or reuse a worktree.
 | Option | Meaning |
 | --- | --- |
 | `--print-path` | Print the worktree path only. Used by the shell wrapper. Overrides `--json`. |
-| `--cd` | Change the calling shell into the worktree. Needs the shell integration. |
-| `--no-cd` | Stay in the current directory. Overrides `GW_CD=1`. The last of the `--cd` pair wins. |
+| `--cd` | Change the calling shell into the worktree. This is the default with the shell integration, so the flag is only needed against `GW_CD=0`. |
+| `--no-cd` | Stay in the current directory. Wins over the default, `--cd`, and `GW_CD`. The last of the `--cd` pair wins. |
 | `--no-fetch` | Do not fetch from origin first. |
 | `--json` | Machine-readable result, including whether `gw` created the worktree. |
 
@@ -70,8 +70,9 @@ The binary cannot perform `--cd`, because a process cannot change the directory
 of its parent shell. Run standalone, `gw add --cd` prints the bare path,
 exactly like `--print-path`, and nothing else. The `gw` shell function from
 [Shell integration](#shell-integration) reads that path and changes the
-directory. Set `GW_CD=1` to make a bare `gw add` change directory as well.
-`--no-cd` cancels this behavior.
+directory. That function makes `gw add` change directory by default;
+`--no-cd` turns it off, and `GW_CD=0` makes staying put the default.
+`GW_CD=1` is still accepted and means the default.
 
 `--cd` and `--no-cd` override each other, so the last one on the command line
 wins. Both override `--json` the same way that `--print-path` does, because a
@@ -129,16 +130,16 @@ lists the project keys that the `.gw.toml` of that layout declares.
 
 ## Shell integration
 
-`gw.sh` defines one function, `gw`. It runs `gw`. For `gw add --cd` (or
-`GW_CD=1`), it changes into the worktree afterwards.
+`gw.sh` defines one function, `gw`. It runs `gw`. For `gw add`, it changes into
+the worktree afterwards unless you give `--no-cd` or set `GW_CD=0`.
 
 Source the file from your shell profile. The script returns early if `gw` is
 not on `PATH`.
 
 The `gw` function shadows the binary so that it can change directory in your
 shell. It passes each argument through unchanged. It changes directory only for
-`add`, and only when you give `--cd` or set `GW_CD=1`. `--no-cd` turns off this
-behavior for one call.
+`add`. `--no-cd` turns this off for one call, and `GW_CD=0` turns it off for
+the session. `GW_CD=1` is accepted and matches the default.
 
 The installer copies the file to
 `${XDG_DATA_HOME:-~/.local/share}/gw/gw.sh`. A source install also keeps the

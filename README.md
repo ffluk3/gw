@@ -10,7 +10,7 @@ directory — nothing is stashed, and nothing is lost.
 
 ```text
 # Without gw                          # With gw
-git stash                             gw add --cd PROJ-102
+git stash                             gw add PROJ-102
 git switch PROJ-102                   ... fix the bug ...
 ... fix the bug ...                   cd ../PROJ-101
 git switch PROJ-101
@@ -54,7 +54,7 @@ cd gw
 ```
 
 Each method writes `gw` to `~/.local/bin`. Then add the shell integration,
-which makes `gw add --cd` change into the new worktree:
+which makes `gw add` change into the new worktree:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
@@ -91,7 +91,7 @@ gw init git@github.com:acme/widgets.git --dir ~/repos/acme/widgets
 
 # open a worktree and enter it
 cd ~/repos/acme/widgets/worktrees/main
-gw add --cd PROJ-1234
+gw add PROJ-1234
 
 # see each worktree
 gw status

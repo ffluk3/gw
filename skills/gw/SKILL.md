@@ -54,9 +54,13 @@ worktree="$(gw add --print-path PROJ-1234)"
   `worktrees/feature/x`.
 
 Use the returned path in `git -C "$worktree" ...` or as an absolute path in
-later commands. Do not assume a `cd` persists between tool calls. Do not use
-`--cd`; it relies on an interactive shell function that changes the caller's
-directory, which a non-interactive tool call cannot rely on.
+later commands. Do not assume a `cd` persists between tool calls.
+
+In an interactive shell with the integration sourced, a bare `gw add` changes
+into the worktree. A non-interactive tool call gets no navigation from it, so
+always use `--print-path` and capture stdout. Name that shell variable
+`worktree`, not `path`: zsh ties `path` to `PATH`, and assigning it replaces
+the command search path.
 
 `gw add` selects the branch source in this order: an existing worktree, a
 remote-tracking branch, a local branch moved to `origin/<branch>`, or a new
@@ -126,9 +130,9 @@ Safety rules for agents:
 
 - `gw add` has no JSON mode. `--json` on `gw add` still prints prose; use
   `--print-path` and capture stdout only.
-- `gw add --cd` is for interactive shells only. It prints the bare path and
-  relies on the sourced `gw` function to `cd`; a non-interactive tool call
-  gets no navigation from it, so use `--print-path` instead.
+- A bare `gw add` changes directory only in an interactive shell that sourced
+  the integration. A non-interactive tool call gets no navigation, so use
+  `--print-path` instead.
 - Some releases print a human progress line to stdout before the
   `gw clean --json` document. If `jq` cannot parse the stream, strip
   everything before the first `{`:

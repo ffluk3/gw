@@ -16,7 +16,7 @@ git switch PROJ-101
 git stash pop          # hope it still applies
 
 # With gw
-gw add --cd PROJ-102
+gw add PROJ-102
 ... fix the bug ...
 cd ../PROJ-101         # still exactly as you left it
 ```
@@ -88,7 +88,7 @@ Install the latest release. You need `curl` and `tar`, not a Rust toolchain:
 curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh | bash
 ```
 
-Then load the shell integration, which makes `gw add --cd` actually change
+Then load the shell integration, which makes `gw add` actually change
 directory:
 
 ```bash
