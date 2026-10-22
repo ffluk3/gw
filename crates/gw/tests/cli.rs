@@ -172,6 +172,33 @@ fn run(cwd: &Path, args: &[&str]) {
     );
 }
 
+/// Add an empty commit to `worktree` whose committer date is `seconds` old.
+///
+/// `gw` measures a worktree's age from its committer date (`git log -1 %ct`),
+/// not wall-clock time, so ageing the commit is what makes a worktree stale
+/// deterministically. Sleeping instead races the clock: a `stale_after` of
+/// `"1s"` needs the commit to be a whole second old, and a commit made
+/// milliseconds earlier is usually age 0.
+fn commit_aged(worktree: &Path, seconds: i64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after the epoch")
+        .as_secs() as i64;
+    let when = format!("@{} +0000", now - seconds);
+    let out = Command::new("git")
+        .current_dir(worktree)
+        .env("GIT_AUTHOR_DATE", &when)
+        .env("GIT_COMMITTER_DATE", &when)
+        .args(["commit", "--allow-empty", "-m", "age this worktree"])
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "aged commit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn status_lists_worktrees_and_skips_the_bare_entry() {
     let fx = Fixture::new();
@@ -2244,6 +2271,7 @@ fn a_settings_only_file_is_not_ignored() {
     // no `[convention]` table, silently discarding every other section.
     let fx = Fixture::new();
     let wt = fx.add_worktree("PROJ-70");
+    commit_aged(&wt, 60);
     fx.publish("PROJ-70");
     write_layout_config(&fx, "[clean]\nstale_after = \"1s\"\n");
 
@@ -2321,7 +2349,8 @@ fn an_invalid_duration_is_a_usage_error_naming_the_file() {
 #[test]
 fn a_file_protected_branch_is_never_deleted() {
     let fx = Fixture::new();
-    fx.add_worktree("release");
+    let wt = fx.add_worktree("release");
+    commit_aged(&wt, 60);
     fx.publish("release");
     write_layout_config(
         &fx,
