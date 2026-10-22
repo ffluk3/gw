@@ -52,7 +52,6 @@ pub enum Reason {
     MergedPr,
     TicketClosed { resolution: String },
     NoMergedPr,
-    NoMergedPrTicketClosed { resolution: String },
 }
 
 /// What should happen to a target.

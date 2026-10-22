@@ -136,12 +136,10 @@ fn gw_command(cwd: &Path) -> Command {
     cmd.current_dir(cwd)
         .env_remove("GW_REPO")
         .env_remove("GW_REPOS_ROOT")
-        .env_remove("GW_JIRA_PROJECT")
         .env_remove("GW_JIRA_BASE_URL")
         .env_remove("GW_JIRA_USER")
         .env_remove("GW_JIRA_API_TOKEN")
         .env_remove("GW_SKIP_PROVIDERS")
-        .env_remove("GW_SKIP_GITHUB")
         .env_remove("GW_CONFIG")
         .env("GW_NO_GLOBAL_CONFIG", "1");
     cmd
@@ -201,7 +199,7 @@ fn clean_dry_run_changes_nothing() {
     let fx = Fixture::new();
     let wt = fx.add_worktree("PROJ-2");
 
-    let out = fx.gw(&["clean", "--dry-run", "--skip-github"]);
+    let out = fx.gw(&["clean", "--dry-run", "--skip-provider", "github"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(wt.is_dir(), "dry run removed the worktree");
 }
@@ -213,7 +211,14 @@ fn clean_refuses_to_remove_a_dirty_worktree() {
     fx.publish("PROJ-3");
     std::fs::write(wt.join("scratch.txt"), "uncommitted\n").unwrap();
 
-    let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(wt.is_dir(), "removed a worktree with uncommitted changes");
     assert!(
@@ -232,7 +237,14 @@ fn clean_refuses_to_remove_unpublished_commits() {
     run(&wt, &["add", "."]);
     run(&wt, &["commit", "-m", "unpublished work"]);
 
-    let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(wt.is_dir(), "removed a worktree with unpublished commits");
     assert!(
@@ -248,7 +260,14 @@ fn clean_removes_a_clean_published_worktree() {
     let wt = fx.add_worktree("PROJ-8");
     fx.publish("PROJ-8");
 
-    let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(!wt.exists(), "clean worktree was not removed");
 }
@@ -258,7 +277,14 @@ fn clean_never_touches_the_default_branch_worktree() {
     let fx = Fixture::new();
     let develop = fx.root.join("worktrees/develop");
 
-    let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(develop.is_dir(), "removed the default branch worktree");
 }
@@ -351,7 +377,14 @@ fn harness_worktrees_are_never_removed() {
         ],
     );
 
-    let out = fx.gw(&["clean", "--yes", "--skip-github", "--stale-days", "0"]);
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     assert!(harness.is_dir(), "removed a harness worktree");
 }
@@ -717,9 +750,19 @@ fn ticket_for<'a>(json: &'a serde_json::Value, branch: &str) -> &'a serde_json::
 }
 
 #[test]
-fn gw_toml_project_filters_ticket_keys() {
+fn allow_projects_filters_ticket_keys() {
     let fx = Fixture::new();
-    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        r#"
+[[convention.ticket_rules]]
+provider = "jira"
+selector = "embedded"
+pattern = '[A-Z][A-Z0-9]+-[0-9]+'
+allow_projects = ["PROJ"]
+"#,
+    )
+    .unwrap();
     fx.add_worktree("PROJ-42");
     fx.add_worktree("OTHER-7");
 
@@ -734,28 +777,6 @@ fn gw_toml_project_filters_ticket_keys() {
     );
 }
 
-#[test]
-fn cli_project_overrides_gw_toml() {
-    let fx = Fixture::new();
-    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
-    fx.add_worktree("PROJ-42");
-    fx.add_worktree("OTHER-7");
-
-    let out = gw_with_env(
-        &fx.bare(),
-        &["status", "--json"],
-        &[
-            ("GW_REPO", fx.root.to_str().unwrap()),
-            ("GW_JIRA_PROJECT", "OTHER"),
-        ],
-    );
-    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
-    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
-
-    assert!(ticket_for(&json, "PROJ-42").is_null());
-    assert_eq!(ticket_for(&json, "OTHER-7"), "OTHER-7");
-}
-
 // ---- machine-readable output for agents -----------------------------------
 
 /// stdout must hold exactly one JSON document, even when the command narrates.
@@ -764,7 +785,7 @@ fn clean_json_writes_only_json_to_stdout() {
     let fx = Fixture::new();
     fx.add_worktree("PROJ-20");
 
-    let out = fx.gw(&["clean", "--dry-run", "--skip-github", "--json"]);
+    let out = fx.gw(&["clean", "--dry-run", "--skip-provider", "github", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let json: serde_json::Value = serde_json::from_str(&out.stdout)
         .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
@@ -778,7 +799,14 @@ fn clean_json_reports_whether_the_plan_was_applied() {
     let wt = fx.add_worktree("PROJ-21");
     fx.publish("PROJ-21");
 
-    let planned = fx.gw(&["clean", "--skip-github", "--stale-days", "0", "--json"]);
+    let planned = fx.gw(&[
+        "clean",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+        "--json",
+    ]);
     assert_eq!(planned.code, 0, "stderr: {}", planned.stderr);
     let json: serde_json::Value = serde_json::from_str(&planned.stdout).expect("valid json");
     assert_eq!(json["applied"], serde_json::json!(false));
@@ -787,7 +815,8 @@ fn clean_json_reports_whether_the_plan_was_applied() {
     let applied = fx.gw(&[
         "clean",
         "--yes",
-        "--skip-github",
+        "--skip-provider",
+        "github",
         "--stale-days",
         "0",
         "--json",
@@ -927,7 +956,7 @@ fn every_documented_json_command_parses() {
     let cases: [(&str, &[&str]); 4] = [
         ("status", &["status", "--json"]),
         ("repos", &["repos", "--json"]),
-        ("clean", &["clean", "--json", "--skip-github"]),
+        ("clean", &["clean", "--json", "--skip-provider", "github"]),
         ("add", &["add", "PROJ-31", "--no-fetch", "--json"]),
     ];
 
@@ -959,7 +988,8 @@ fn clean_json_moves_restore_hints_to_stderr() {
         "clean",
         "--yes",
         "--delete-branches",
-        "--skip-github",
+        "--skip-provider",
+        "github",
         "--stale-days",
         "0",
         "--json",
@@ -994,7 +1024,8 @@ fn clean_json_emits_a_document_on_partial_failure() {
     let out = fx.gw(&[
         "clean",
         "--yes",
-        "--skip-github",
+        "--skip-provider",
+        "github",
         "--stale-days",
         "0",
         "--json",
@@ -1022,7 +1053,8 @@ fn clean_dry_run_beats_yes() {
         "clean",
         "--dry-run",
         "--yes",
-        "--skip-github",
+        "--skip-provider",
+        "github",
         "--stale-days",
         "0",
         "--json",
@@ -1038,7 +1070,7 @@ fn clean_dry_run_beats_yes() {
 #[test]
 fn clean_json_with_an_empty_plan_still_parses() {
     let fx = Fixture::new();
-    let out = fx.gw(&["clean", "--skip-github", "--json"]);
+    let out = fx.gw(&["clean", "--skip-provider", "github", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
     assert_eq!(json["applied"], json!(false));
@@ -1059,10 +1091,9 @@ fn json_stdout_survives_lookup_failures() {
         &[
             ("GW_REPO", fx.root.to_str().unwrap()),
             ("GW_JIRA_BASE_URL", "https://127.0.0.1:1"),
-            ("GW_JIRA_PROJECT", "PROJ"),
             ("GW_JIRA_USER", "user@example.com"),
             ("GW_JIRA_API_TOKEN", "not-a-real-token"),
-            ("GW_SKIP_GITHUB", "1"),
+            ("GW_SKIP_PROVIDERS", "github"),
         ],
     );
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -1135,7 +1166,11 @@ pattern = '[A-Z][A-Z0-9]+-[0-9]+'
     )
     .unwrap();
     // The layout narrows only the project list.
-    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = '[A-Z][A-Z0-9]+-[0-9]+'\nallow_projects = [\"PROJ\"]\n",
+    )
+    .unwrap();
     fx.add_worktree("PROJ-5");
     fx.add_worktree("OTHER-9");
 
@@ -1163,7 +1198,11 @@ fn convention_show_names_both_source_files() {
         "[[convention.change_rules]]\nprovider = \"github\"\nselector = \"head_branch\"\n",
     )
     .unwrap();
-    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = '[A-Z][A-Z0-9]+-[0-9]+'\n",
+    )
+    .unwrap();
 
     let out = gw_with_env(
         &fx.bare(),

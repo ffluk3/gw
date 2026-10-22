@@ -11,10 +11,7 @@ gw [GLOBAL OPTIONS] <COMMAND> [OPTIONS]
 | `--repo <PATH\|SLUG>` | `GW_REPO` | Layout root, `.bare` path, or `owner/name` resolved under the repos root. |
 | `--json` | — | Force machine-readable output. |
 | `--no-color` | `NO_COLOR` | Disable color and emoji. |
-| `--jira-project <KEY>` | `GW_JIRA_PROJECT` | Ticket prefixes that a branch can reference. Comma-separated, repeatable. |
-| `--jira-url <URL>` | `GW_JIRA_BASE_URL` | JIRA base URL. Must be `https://`. |
 | `--skip-provider <ID>` | `GW_SKIP_PROVIDERS` | Do not query this provider. Comma-separated, repeatable. |
-| `--skip-github` | `GW_SKIP_GITHUB` | Skip the code-host lookup. Same as `--skip-provider github`. |
 
 The argument parser provides `--help` and `--version`.
 
@@ -47,7 +44,7 @@ The command fails if `<root>/.bare/HEAD` already exists.
 
 | Option | Meaning |
 | --- | --- |
-| `--no-jira` | Skip the JIRA summary lookup. |
+
 
 Columns: `BRANCH`, `LAST COMMIT`, `DIRTY`, `STATE`, `SUMMARY`.
 
@@ -102,7 +99,7 @@ Remove worktrees and delete branches.
 | `--closed` | — | Also remove worktrees whose ticket is closed. |
 | `--delete-branches` | — | Also delete stale orphan branches that are fully published. |
 | `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Default 7. |
-| `--no-jira` | — | Skip the JIRA lookup. |
+
 | `--json` | — | Machine-readable plan, with `applied` to say whether it ran. |
 
 The command fetches with prune first. A fetch failure prints a warning and

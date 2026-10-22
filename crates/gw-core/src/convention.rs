@@ -262,11 +262,6 @@ impl Convention {
         }
     }
 
-    #[must_use]
-    pub fn is_built_in(&self) -> bool {
-        *self == Self::built_in()
-    }
-
     /// Apply the convention to one branch name.
     ///
     /// Rules are evaluated in order. Ticket rules stop at the first match in

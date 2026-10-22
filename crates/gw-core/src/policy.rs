@@ -12,8 +12,6 @@ pub struct Policy {
     pub clean_closed_tickets: bool,
     /// Delete orphan local branches that are fully pushed and stale.
     pub delete_branches: bool,
-    /// Plan only; never mutate.
-    pub dry_run: bool,
 }
 
 impl Default for Policy {
@@ -22,15 +20,6 @@ impl Default for Policy {
             stale_after_secs: 7 * 86_400,
             clean_closed_tickets: false,
             delete_branches: true,
-            dry_run: false,
         }
-    }
-}
-
-impl Policy {
-    #[must_use]
-    pub fn with_stale_days(mut self, days: i64) -> Self {
-        self.stale_after_secs = days.saturating_mul(86_400);
-        self
     }
 }

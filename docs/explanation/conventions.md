@@ -40,7 +40,7 @@ This is the 1:1:1 mapping earlier versions compiled in: one branch, one ticket,
 one pull request. It stays the default because it is a sane starting point, not
 because it is required.
 
-The `[jira] project` setting narrows the first rule to a set of project
+The `allow_projects` field on that rule narrows it to a set of project
 prefixes. That is why a layout can say "only `PROJ` keys count" without
 changing anything else.
 

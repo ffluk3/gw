@@ -5,20 +5,16 @@ Use this guide to add ticket summaries to `gw status` and ticket state to
 
 ## Set the base URL
 
-Put the URL in `.gw.toml` at the layout root, beside `.bare`:
+Put the URL in `~/.gw.toml` to use it everywhere, or in `.gw.toml` at a layout
+root to scope it to one repository:
 
 ```toml
-[jira]
+[convention.providers.jira]
 base_url = "https://acme.atlassian.net"
 ```
 
-Or pass the URL for one command:
-
-```bash
-gw --jira-url https://acme.atlassian.net status
-```
-
-The base URL must use `https://`. `gw` rejects plain HTTP.
+`GW_JIRA_BASE_URL` works too, when the file does not set one. The base URL must
+use `https://`; `gw` rejects plain HTTP.
 
 ## Set credentials
 
@@ -30,8 +26,8 @@ export GW_JIRA_USER=me@acme.com
 export GW_JIRA_API_TOKEN=...
 ```
 
-`JIRA_USER` and `JIRA_API_TOKEN` also work. If you set both names, the `GW_`
-names win.
+The `GW_` prefix avoids a collision with other tools that read a bare
+`JIRA_API_TOKEN`.
 
 ## Limit the ticket prefixes
 
@@ -39,8 +35,11 @@ Without configuration, each key shaped like `ABC-123` counts. To accept only
 your project:
 
 ```toml
-[jira]
-project = ["PROJ", "OPS"]
+[[convention.ticket_rules]]
+provider = "jira"
+selector = "embedded"
+pattern = '[A-Z][A-Z0-9]+-[0-9]+'
+allow_projects = ["PROJ", "OPS"]
 ```
 
 Matching ignores case. A branch such as `feature/PROJ-123-thing` matches. A key

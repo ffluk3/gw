@@ -9,7 +9,6 @@ use gw_core::ProviderId;
 
 use crate::providers::command::{Capability, CommandProvider};
 use crate::providers::{ChangeProvider, TicketProvider, Unavailable};
-use crate::settings::Settings;
 
 /// The providers available for one run.
 pub struct Registry {
@@ -26,16 +25,16 @@ impl Registry {
     /// base URL or credentials is inactive, not failing. Every inactive
     /// provider records why, so `gw convention show` can explain it.
     #[must_use]
-    pub fn build(settings: &Settings, loaded: &crate::convention_file::Loaded) -> Self {
+    pub fn build(loaded: &crate::convention_file::Loaded, skipped: Vec<ProviderId>) -> Self {
         let mut registry = Self {
             tickets: Vec::new(),
             changes: Vec::new(),
             unavailable: Vec::new(),
-            skipped: settings.skip_providers.iter().cloned().collect(),
+            skipped: skipped.into_iter().collect(),
         };
 
         registry.add_jira(loaded);
-        registry.add_github(settings);
+        registry.add_github();
         registry.add_commands(loaded);
 
         registry
@@ -130,21 +129,16 @@ impl Registry {
             Some(jira) => self.tickets.push(Box::new(jira)),
             None => self.unavailable.push(Unavailable {
                 id,
-                reason: "set a base URL in .gw.toml and GW_JIRA_USER / GW_JIRA_API_TOKEN".into(),
+                reason: "set [convention.providers.jira] base_url and the \
+                         JIRA credentials in the environment"
+                    .to_string(),
             }),
         }
     }
 
-    fn add_github(&mut self, settings: &Settings) {
+    fn add_github(&mut self) {
         let id = ProviderId::parse("github").expect("literal is a valid provider id");
         if self.skipped.contains(&id) {
-            return;
-        }
-        if settings.skip_github {
-            self.unavailable.push(Unavailable {
-                id,
-                reason: "--skip-github".into(),
-            });
             return;
         }
         self.changes
@@ -158,23 +152,22 @@ mod tests {
 
     #[test]
     fn jira_without_configuration_is_inactive_and_says_why() {
-        let registry = Registry::build(&Settings::default(), &Default::default());
+        let registry = Registry::build(&Default::default(), Vec::new());
         let jira = ProviderId::parse("jira").unwrap();
         assert!(registry.ticket_provider(&jira).is_none());
-        assert!(registry
-            .inactive_reason(&jira)
-            .is_some_and(|reason| reason.contains("base URL")));
+        assert!(
+            registry
+                .inactive_reason(&jira)
+                .is_some_and(|reason| reason.contains("base_url")),
+            "the reason should name the setting that is missing"
+        );
     }
 
     #[test]
-    fn skip_github_removes_the_provider_without_claiming_it_is_broken() {
-        let settings = Settings {
-            skip_github: true,
-            ..Settings::default()
-        };
+    fn a_skipped_provider_is_absent_and_says_why() {
         let github = ProviderId::parse("github").unwrap();
-        let registry = Registry::build(&settings, &Default::default());
+        let registry = Registry::build(&Default::default(), vec![github.clone()]);
         assert!(registry.change_provider(&github).is_none());
-        assert_eq!(registry.inactive_reason(&github), Some("--skip-github"));
+        assert!(registry.inactive_reason(&github).is_none());
     }
 }

@@ -24,7 +24,7 @@ branches: in a layout, that strands or collides with another checkout.
 ## Confirm you are in a layout
 
 ```bash
-gw status --json --no-jira
+gw status --json --skip-provider jira,github
 ```
 
 Exit 0 means the current directory is inside a layout (any subdirectory
@@ -117,9 +117,10 @@ Safety rules for agents:
   Without it those entries are recommendations only.
 - Exit 3 means some destructive actions failed and some succeeded. Report the
   partial result; do not retry blindly.
-- `--skip-github` hides merged PRs; `--no-jira` hides closed tickets and
-  summaries. Use them only when `gh`, `curl`, or credentials are unavailable,
-  and say that the preview was reduced.
+- `--skip-provider <id>` hides that provider's facts: skipping `github`
+  hides merged PRs, skipping `jira` hides closed tickets and summaries. Use it
+  only when `gh`, `curl`, or credentials are unavailable, and say that the
+  preview was reduced.
 
 ## Gotchas
 

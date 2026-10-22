@@ -11,10 +11,9 @@ show` says why it is inactive.
 
 ### `jira` — tickets
 
-Reads a base URL from `[convention.providers.jira] base_url`, `[jira]
-base_url`, `GW_JIRA_BASE_URL`, or `--jira-url`. Credentials come from
-`GW_JIRA_USER` (or `JIRA_USER`) and `GW_JIRA_API_TOKEN` (or
-`JIRA_API_TOKEN`) only.
+Reads a base URL from `[convention.providers.jira] base_url`, or from
+`GW_JIRA_BASE_URL` when the file does not set one. Credentials come from
+`GW_JIRA_USER` and `GW_JIRA_API_TOKEN` only.
 
 | Setting | Meaning | Default |
 | --- | --- | --- |
@@ -126,6 +125,25 @@ ticket":
 `unknown` blocks the verdict it would have justified. A worktree is never
 removed because a provider could not answer.
 
+## Selecting a change
+
+Three selectors can appear as a query `kind`. A provider chooses which it can
+answer; the convention decides which are asked for.
+
+| Selector | Query carries | What a host usually maps it to |
+| --- | --- | --- |
+| `head_branch` | `branch` | A change whose source branch is that name. |
+| `contains_commit` | `branch`, `ticket` | A merged change containing one of the branch's commits. Use this when a host squashes and the head branch is gone. |
+| `mention_ticket` | `branch`, `ticket` | A change whose title or body refers to the ticket. Weaker: pair it with `strength = "mention"` unless the host guarantees the association. |
+
+A provider that cannot answer a selector it was asked for must return
+`unknown`, or omit the result. It must not return `open` or `merged` as a
+stand-in. "I cannot tell" and "not merged" lead to opposite decisions, and only
+one of them is safe to guess wrong.
+
+The request for every selector carries `branch`, so a provider can answer
+positionally even when it ignores `ticket`.
+
 ## Writing a provider
 
 A provider only needs to answer what it was asked. It does not decide what a
@@ -134,3 +152,10 @@ should be removed. Those are the convention's job and the classifier's job, and
 keeping them out of the provider is what makes the convention portable.
 
 Print diagnostics to stderr. stdout is the protocol channel.
+
+### Adding a built-in provider
+
+An adapter in the binary implements `TicketProvider` or `ChangeProvider` and
+registers itself in `Registry::build` when its configuration is complete. The
+same rules apply: return one observation per query, and make an unanswerable
+query `unknown`. Nothing in the classifier changes when you add one.

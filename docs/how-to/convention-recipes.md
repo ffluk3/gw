@@ -16,12 +16,17 @@ globally:
 
 ```toml
 # ~/.gw.toml
-[jira]
-project = ["PROJ", "OPS"]
+[convention.providers.jira]
 base_url = "https://example.atlassian.net"
+
+[[convention.ticket_rules]]
+provider = "jira"
+selector = "embedded"
+pattern = '[A-Z][A-Z0-9]+-[0-9]+'
+allow_projects = ["PROJ", "OPS"]
 ```
 
-`jira.project` narrows which branch prefixes count. A branch named
+`allow_projects` narrows which branch prefixes count. A branch named
 `feature/PROJ-12-rate-limit` resolves to `PROJ-12`, and a pull request whose
 head branch is that same branch name counts as its change.
 
@@ -134,11 +139,14 @@ Put the layout file beside `.bare`:
 
 ```toml
 # <root>/.gw.toml
-[jira]
-project = ["PROJ"]
+[[convention.ticket_rules]]
+provider = "jira"
+selector = "embedded"
+pattern = '[A-Z][A-Z0-9]+-[0-9]+'
+allow_projects = ["PROJ"]
 ```
 
-A list in the layout file replaces the global list for that layout. An absent
+A rule list in the layout file replaces the global list for that layout. An absent
 key inherits the global value. `ticket_rules = []` clears an inherited rule
 list.
 

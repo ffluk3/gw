@@ -185,13 +185,6 @@ pub struct WorktreeSnapshot {
 }
 
 impl WorktreeSnapshot {
-    /// A worktree is removable only when the facts needed to justify removal
-    /// were all observed successfully.
-    #[must_use]
-    pub fn status_observed(&self) -> bool {
-        self.dirty != Dirty::Unknown
-    }
-
     /// The first identity-strength ticket observation.
     #[must_use]
     pub fn primary_ticket(&self) -> Option<&TicketObservation> {
@@ -322,23 +315,6 @@ impl RepoSnapshot {
     #[must_use]
     pub fn is_worktree_protected(&self, branch: &BranchName) -> bool {
         self.default_branch.as_ref() == Some(branch) || self.head_branch.as_ref() == Some(branch)
-    }
-
-    /// The ticket a branch resolves to under the given convention.
-    ///
-    /// The convention is passed in rather than stored on the snapshot: the
-    /// snapshot is a record of facts, and how a branch maps to a ticket is
-    /// configuration, not an observation.
-    #[must_use]
-    pub fn ticket_for(
-        &self,
-        branch: &BranchName,
-        convention: &crate::convention::Convention,
-    ) -> Option<TicketId> {
-        convention
-            .resolve(branch.as_str())
-            .primary_ticket()
-            .map(|t| t.id.clone())
     }
 }
 

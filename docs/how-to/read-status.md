@@ -30,7 +30,7 @@ these worktrees. `prunable` means that git reports that the directory is gone.
 ## Skip the JIRA lookup
 
 ```bash
-gw status --no-jira
+gw status --skip-provider jira
 ```
 
 Use this option when JIRA is slow or not configured.

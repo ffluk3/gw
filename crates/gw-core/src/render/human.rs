@@ -35,9 +35,6 @@ pub fn describe_reason(reason: &Reason) -> String {
         Reason::MergedPr => "PR merged".into(),
         Reason::TicketClosed { resolution } => format!("ticket closed ({resolution})"),
         Reason::NoMergedPr => "no merged PR found".into(),
-        Reason::NoMergedPrTicketClosed { resolution } => {
-            format!("no merged PR; ticket closed ({resolution})")
-        }
     }
 }
 
@@ -54,7 +51,6 @@ pub fn glyph(reason: &Reason) -> &'static str {
         }
         Reason::HarnessWorktree | Reason::DetachedHead | Reason::NoMergedPr => "⏭",
         Reason::Protected | Reason::RecentlyActive { .. } => "🔒",
-        Reason::NoMergedPrTicketClosed { .. } => "🎫",
     }
 }
 

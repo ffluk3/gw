@@ -21,7 +21,7 @@ gw() {
     fi
     case "$arg" in
       # Global options that take a value; the value is not the subcommand.
-      --repo | --jira-project | --jira-url) skip_next=1 ;;
+      --repo | --skip-provider) skip_next=1 ;;
       -*) ;;
       *)
         subcommand=$arg

@@ -47,27 +47,10 @@ pub struct Cli {
     #[arg(long, global = true, env = "NO_COLOR")]
     pub no_color: bool,
 
-    /// JIRA project key(s) a branch name may reference. Comma-separated.
-    #[arg(
-        long = "jira-project",
-        global = true,
-        env = "GW_JIRA_PROJECT",
-        value_delimiter = ',',
-        value_name = "KEY"
-    )]
-    pub jira_project: Vec<String>,
-
-    /// JIRA base URL. Overrides the value in `.gw.toml` and `~/.gw.toml`.
-    #[arg(
-        long = "jira-url",
-        global = true,
-        env = "GW_JIRA_BASE_URL",
-        value_name = "URL"
-    )]
-    pub jira_url: Option<String>,
-
-    /// Do not query this provider. Repeatable. Providers are named in
-    /// `.gw.toml` rules; the built-in ones are `jira` and `github`.
+    /// Do not query this provider. Repeatable.
+    ///
+    /// Providers are named by the rules in `.gw.toml`; the built-in ones are
+    /// `jira` and `github`.
     #[arg(
         long = "skip-provider",
         global = true,
@@ -76,14 +59,6 @@ pub struct Cli {
         value_name = "ID"
     )]
     pub skip_provider: Vec<String>,
-
-    /// Skip the code-host change lookup. Same as `--skip-provider github`.
-    ///
-    /// `GW_SKIP_GITHUB` is read as a presence flag, so `GW_SKIP_GITHUB=1` and
-    /// `GW_SKIP_GITHUB=0` both mean "skip" — matching how the variable behaved
-    /// before this flag existed.
-    #[arg(long, global = true)]
-    pub skip_github: bool,
 
     #[command(subcommand)]
     pub command: Command,
@@ -154,11 +129,7 @@ pub struct InitArgs {
 }
 
 #[derive(Debug, Args)]
-pub struct StatusArgs {
-    /// Skip the JIRA summary lookup.
-    #[arg(long)]
-    pub no_jira: bool,
-}
+pub struct StatusArgs {}
 
 #[derive(Debug, Args)]
 pub struct AddArgs {
@@ -216,10 +187,6 @@ pub struct CleanArgs {
     /// Also delete stale orphan local branches whose commits are all published.
     #[arg(long)]
     pub delete_branches: bool,
-
-    /// Skip the JIRA lookup.
-    #[arg(long)]
-    pub no_jira: bool,
 
     /// Days since the last commit before a worktree is stale.
     #[arg(long = "stale-days", env = "GW_STALE_DAYS", default_value_t = 7)]

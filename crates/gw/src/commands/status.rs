@@ -11,17 +11,15 @@ use crate::providers::Limits;
 
 use super::snapshot;
 
-pub fn run(ctx: &Context, args: StatusArgs) -> Result<Outcome, Error> {
+pub fn run(ctx: &Context, _args: StatusArgs) -> Result<Outcome, Error> {
     let now = now_epoch();
     let mut snap = snapshot::load(ctx, now)?;
 
     // Ticket summaries are best-effort: a failure degrades the table, it does
-    // not fail the command.
-    if !args.no_jira {
-        let refs = snapshot::ticket_refs(&snap, &ctx.convention);
-        let observations = snapshot::observe_tickets(&ctx.registry(), &refs, Limits::default());
-        snapshot::attach_tickets(&mut snap, &ctx.convention, &observations);
-    }
+    // not fail the command. Use `--skip-provider` to avoid the lookup entirely.
+    let refs = snapshot::ticket_refs(&snap, &ctx.convention);
+    let observations = snapshot::observe_tickets(&ctx.registry(), &refs, Limits::default());
+    snapshot::attach_tickets(&mut snap, &ctx.convention, &observations);
 
     if ctx.is_json() {
         print_json(&snap);

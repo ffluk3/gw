@@ -228,7 +228,6 @@ this value from flags or from the exit code.
 | `merged_pr` | GitHub reports a merged PR |
 | `ticket_closed` | The JIRA ticket is closed |
 | `no_merged_pr` | `gw` found no reason to remove |
-| `no_merged_pr_ticket_closed` | No merged PR, but the ticket is closed |
 
 `stale`, `recently_active`, and `ticket_closed` have extra fields (`age_secs`
 or `resolution`) with `reason`.
@@ -261,7 +260,7 @@ or `resolution`) with `reason`.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `ticket_rules` | array | In evaluation order. |
-| `ticket_rules_origin` | string | `built-in`, `global`, `layout`, or `command_line`. |
+| `ticket_rules_origin` | string | `built-in`, `global`, or `layout`. |
 | `change_rules` | array | In evaluation order. |
 | `change_rules_origin` | string | Same values as above. |
 | `providers` | array | Each provider, whether it is active, and why not. |

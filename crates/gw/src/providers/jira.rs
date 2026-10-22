@@ -25,9 +25,9 @@ impl JiraRest {
     /// not configured. Callers treat absence as "provider inactive", never an
     /// error.
     ///
-    /// The base URL comes from `--jira-url`, `GW_JIRA_BASE_URL`, `[jira]`, or
-    /// `[convention.providers.jira]`. Credentials come from the environment
-    /// only, so they are never written to a file that might be committed.
+    /// The base URL comes from `[convention.providers.jira] base_url`, in
+    /// either configuration file. Credentials come from the environment only,
+    /// so they are never written to a file that might be committed.
     /// Build an adapter from the merged configuration.
     ///
     /// The files win over `Settings`: a `[convention.providers.jira]` table is
@@ -35,15 +35,9 @@ impl JiraRest {
     /// `[jira]` values plus the CLI overrides.
     pub fn from_config(loaded: &crate::convention_file::Loaded) -> Option<Self> {
         let provider = loaded.providers.iter().find(|p| p.id.as_str() == "jira");
-        let base_url = provider
-            .and_then(|p| p.base_url.clone())
-            .or_else(|| loaded.jira_base_url.clone())?;
-        let user = std::env::var("GW_JIRA_USER")
-            .or_else(|_| std::env::var("JIRA_USER"))
-            .ok()?;
-        let token = std::env::var("GW_JIRA_API_TOKEN")
-            .or_else(|_| std::env::var("JIRA_API_TOKEN"))
-            .ok()?;
+        let base_url = provider.and_then(|p| p.base_url.clone())?;
+        let user = std::env::var("GW_JIRA_USER").ok()?;
+        let token = std::env::var("GW_JIRA_API_TOKEN").ok()?;
         if base_url.trim().is_empty() || user.trim().is_empty() || token.trim().is_empty() {
             return None;
         }

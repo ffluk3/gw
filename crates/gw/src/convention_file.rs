@@ -38,8 +38,6 @@ pub enum Origin {
     Global,
     /// `<root>/.gw.toml`.
     Layout,
-    /// A command-line flag or its environment binding.
-    CommandLine,
 }
 
 impl Origin {
@@ -49,7 +47,6 @@ impl Origin {
             Origin::BuiltIn => "built-in",
             Origin::Global => "global",
             Origin::Layout => "layout",
-            Origin::CommandLine => "command-line",
         }
     }
 }
@@ -90,10 +87,6 @@ pub struct Loaded {
     pub providers: Vec<ProviderConfig>,
     /// Files that were read, in merge order.
     pub sources: Vec<PathBuf>,
-    /// Legacy `[jira] project`, carried forward.
-    pub jira_project: Vec<String>,
-    /// Legacy `[jira] base_url`, carried forward.
-    pub jira_base_url: Option<String>,
 }
 
 /// Load one file, with no global layer and no inheritance.
@@ -110,7 +103,6 @@ pub fn load_layout_only(layout_root: &Path) -> Result<Loaded, Error> {
         loaded.sources.push(path);
         apply(&mut loaded, file, Origin::Layout)?;
     }
-    loaded.jira_project = normalize(loaded.jira_project);
     Ok(loaded)
 }
 
@@ -139,23 +131,10 @@ pub fn load(layout_root: &Path) -> Result<Loaded, Error> {
         apply(&mut loaded, file, origin)?;
     }
 
-    loaded.jira_project = normalize(loaded.jira_project);
-    if loaded.jira_base_url.as_deref().is_some_and(str::is_empty) {
-        loaded.jira_base_url = None;
-    }
     Ok(loaded)
 }
 
 fn apply(loaded: &mut Loaded, file: File, origin: Origin) -> Result<(), Error> {
-    if let Some(jira) = file.jira {
-        if let Some(project) = jira.project {
-            loaded.jira_project = project.into_vec();
-        }
-        if let Some(base_url) = jira.base_url {
-            loaded.jira_base_url = Some(base_url);
-        }
-    }
-
     let Some(convention) = file.convention else {
         return Ok(());
     };
@@ -199,25 +178,9 @@ fn explicit_or_global_path() -> Option<PathBuf> {
     std::env::var_os("HOME").map(|home| PathBuf::from(home).join(GLOBAL_FILE))
 }
 
-fn normalize(projects: Vec<String>) -> Vec<String> {
-    let mut out: Vec<String> = Vec::with_capacity(projects.len());
-    for project in projects {
-        let trimmed = project.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if !out.iter().any(|p| p.eq_ignore_ascii_case(trimmed)) {
-            out.push(trimmed.to_string());
-        }
-    }
-    out
-}
-
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct File {
-    #[serde(default)]
-    jira: Option<JiraTable>,
     #[serde(default)]
     convention: Option<ConventionTable>,
 }
@@ -229,36 +192,44 @@ impl File {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(Error::Usage(format!("cannot read {}: {e}", path.display()))),
         };
-        toml::from_str(&text)
-            .map(Some)
-            .map_err(|e| Error::Usage(format!("invalid {}:\n  {e}", path.display())))
+        toml::from_str(&text).map(Some).map_err(|e| {
+            Error::Usage(format!(
+                "invalid {}:\n{}{}",
+                path.display(),
+                indent(&e.to_string()),
+                hint(&e)
+            ))
+        })
     }
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-struct JiraTable {
-    #[serde(default)]
-    project: Option<ProjectValue>,
-    #[serde(default)]
-    base_url: Option<String>,
+/// Indent each line of a parser error under the file name, so a multi-line
+/// caret diagram stays aligned.
+fn indent(text: &str) -> String {
+    text.lines()
+        .map(|line| format!("  {line}\n"))
+        .collect::<String>()
 }
 
-/// `project = "PROJ"` or `project = ["PROJ", "OPS"]`.
-#[derive(Debug, Deserialize)]
-#[serde(untagged)]
-enum ProjectValue {
-    One(String),
-    Many(Vec<String>),
-}
-
-impl ProjectValue {
-    fn into_vec(self) -> Vec<String> {
-        match self {
-            Self::One(value) => vec![value],
-            Self::Many(values) => values,
-        }
+/// A next step for the two configuration mistakes a user actually makes.
+///
+/// The parser says `unknown field \`jira\`, expected \`convention\``, which is
+/// accurate and useless to someone holding a config file from an earlier
+/// version. Name the replacement instead.
+fn hint(error: &toml::de::Error) -> &'static str {
+    let text = error.to_string();
+    if text.contains("unknown field `jira`") {
+        return "\n  JIRA is configured under [convention.providers.jira], with its\n  \
+                project filter on a [[convention.ticket_rules]] entry.\n  \
+                See docs/how-to/configure-jira.md.\n";
     }
+    if text.contains("unknown field `project`") || text.contains("unknown field `base_url`") {
+        return "\n  Set these under [convention.providers.jira] and the ticket rule.\n";
+    }
+    if text.contains("unknown field `provider`") {
+        return "\n  A rule needs provider and selector. See docs/reference/configuration.md.\n";
+    }
+    ""
 }
 
 #[derive(Debug, Default, Deserialize)]

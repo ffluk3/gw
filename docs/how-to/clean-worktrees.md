@@ -61,8 +61,7 @@ A skipped provider reports nothing, so `gw` removes fewer worktrees: without
 change information it cannot see a merge, and without ticket information it
 cannot see a closed ticket. Nothing is removed on a missing fact.
 
-`--skip-github` and `GW_SKIP_GITHUB` still work and mean the same as
-`--skip-provider github`.
+A skipped provider is not asked, and its absence never counts as a fact.
 
 ## Restore an object that you deleted
 

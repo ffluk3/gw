@@ -202,10 +202,6 @@ fn policy() -> Vec<Policy> {
             stale_after_secs: 0,
             ..Policy::default()
         },
-        Policy {
-            dry_run: true,
-            ..Policy::default()
-        },
     ]
 }
 
@@ -223,7 +219,7 @@ const DAY: i64 = 86_400;
 #[test]
 fn never_removes_a_dirty_or_unreadable_worktree() {
     for seed in 0..200 {
-        for pi in 0..5 {
+        for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
@@ -250,7 +246,7 @@ fn never_removes_a_dirty_or_unreadable_worktree() {
 #[test]
 fn never_removes_unpublished_commits() {
     for seed in 0..200 {
-        for pi in 0..5 {
+        for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
@@ -277,7 +273,7 @@ fn never_removes_unpublished_commits() {
 #[test]
 fn never_removes_a_protected_branch() {
     for seed in 0..200 {
-        for pi in 0..5 {
+        for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
                 if !matches!(decision, Decision::Remove { .. }) {
@@ -296,7 +292,7 @@ fn never_removes_a_protected_branch() {
 #[test]
 fn never_touches_the_harness_worktrees() {
     for seed in 0..200 {
-        for pi in 0..5 {
+        for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
                 if !decision.is_destructive() {
@@ -338,7 +334,7 @@ fn never_deletes_branches_unless_enabled() {
 #[test]
 fn never_deletes_a_protected_or_unpublished_branch() {
     for seed in 0..200 {
-        for pi in 0..5 {
+        for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
                 let Decision::Delete { tip, .. } = decision else {

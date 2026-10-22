@@ -7,7 +7,6 @@ use crate::config::resolve_layout;
 use crate::error::Error;
 use crate::git::{CliGit, GitBackend};
 use crate::providers::Registry;
-use crate::settings::Settings;
 
 /// Everything a command needs, wired once.
 pub struct Context {
@@ -46,12 +45,8 @@ impl Context {
             }
         }
 
-        let mut loaded = crate::convention_file::load(&layout.root)?;
-        apply_jira_settings(&mut loaded, &cli.jira_project, cli.jira_url.as_deref())?;
-
-        let settings = Settings::from_loaded(&loaded, skip_providers(cli), skip_github(cli));
-
-        let registry = Registry::build(&settings, &loaded);
+        let loaded = crate::convention_file::load(&layout.root)?;
+        let registry = Registry::build(&loaded, skip_providers(cli));
         let convention = loaded.convention.clone();
 
         Ok(Self {
@@ -76,68 +71,6 @@ impl Context {
     pub fn is_json(&self) -> bool {
         self.json
     }
-}
-
-/// Whether the code-host lookup was disabled for this run.
-///
-/// `GW_SKIP_GITHUB` historically means "set to anything"; `--skip-github`
-/// means the same. Both collapse into one flag here so the registry has a
-/// single rule to follow.
-fn skip_github(cli: &Cli) -> bool {
-    cli.skip_github || std::env::var_os("GW_SKIP_GITHUB").is_some()
-}
-
-/// Fold the legacy JIRA settings into the convention.
-///
-/// `[jira]` predates conventions, so it is translated rather than kept as a
-/// parallel mechanism. Three things happen here, in precedence order from
-/// lowest to highest:
-///
-/// 1. `[jira] project` from either file narrows every embedded ticket rule.
-/// 2. `--jira-project` / `GW_JIRA_PROJECT` replaces that list outright.
-/// 3. `--jira-url` / `GW_JIRA_BASE_URL` overrides both files' base URL.
-///
-/// Narrowing applies only to rules that already have no project filter. A
-/// `[convention.ticket_rules]` entry that names its own `allow_projects` is
-/// more specific than the legacy table and keeps it.
-fn apply_jira_settings(
-    loaded: &mut crate::convention_file::Loaded,
-    cli_projects: &[String],
-    cli_base_url: Option<&str>,
-) -> Result<(), Error> {
-    let projects = if cli_projects.is_empty() {
-        &loaded.jira_project
-    } else {
-        cli_projects
-    };
-
-    if !projects.is_empty() {
-        let normalized: Vec<String> = projects
-            .iter()
-            .map(|p| p.trim().to_string())
-            .filter(|p| !p.is_empty())
-            .collect();
-        for rule in &mut loaded.convention.ticket_rules {
-            let gw_core::TicketSelector::Embedded { allow_projects, .. } = &mut rule.selector;
-            if allow_projects.is_empty() {
-                *allow_projects = normalized.clone();
-            }
-        }
-        if loaded.ticket_rules_origin == crate::convention_file::Origin::BuiltIn
-            && !normalized.is_empty()
-        {
-            loaded.ticket_rules_origin = if cli_projects.is_empty() {
-                crate::convention_file::Origin::Layout
-            } else {
-                crate::convention_file::Origin::CommandLine
-            };
-        }
-    }
-
-    if let Some(url) = cli_base_url.filter(|s| !s.trim().is_empty()) {
-        loaded.jira_base_url = Some(url.to_string());
-    }
-    Ok(())
 }
 
 /// Providers named by `--skip-provider`, rejecting invalid slugs.

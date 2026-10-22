@@ -21,7 +21,6 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         stale_after_secs: args.stale_days.saturating_mul(86_400),
         clean_closed_tickets: args.closed,
         delete_branches: args.delete_branches,
-        dry_run: args.dry_run,
     };
 
     let now = now_epoch();
@@ -268,7 +267,6 @@ mod tests {
             yes,
             closed: false,
             delete_branches: false,
-            no_jira: false,
             stale_days: 7,
         }
     }
