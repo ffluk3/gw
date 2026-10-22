@@ -16,6 +16,12 @@ binary=${1:-}
   exit 2
 }
 
+# Absolute before anything changes directory: the cases below `cd` into the
+# fixture, and a relative path would then point at nothing. A missing binary
+# makes every "enters the worktree" case look like a failure to enter, so
+# resolve it once here and assert it is really on PATH below.
+binary=$(cd "$(dirname "$binary")" && pwd)/$(basename "$binary")
+
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 wrapper="$script_dir/../shell/gw.sh"
 [[ -f $wrapper ]] || {
@@ -46,17 +52,28 @@ check() {
   local shell=$1 description=$2 expected=$3 env=$4
   shift 4
 
+  # Run `gw` without discarding stderr. Silencing it hides the wrapper failing
+  # outright, which looks exactly like the "stayed put" cases passing.
+  local shell_err="$tmp/stderr.$shell"
   local actual
   actual=$(
     cd "$root" || exit 1
     PATH="$(dirname "$binary"):$PATH" "$shell" -f -c "
+      command -v gw >/dev/null || { echo 'gw not on PATH' >&2; exit 127; }
       set -- $(printf '%q ' "$@")
       source $(printf '%q' "$wrapper")
       $env
-      gw \"\$@\" >/dev/null 2>&1
+      gw \"\$@\" >/dev/null
+      printf '\n%s\n' \"\$?\"
       pwd -P
-    "
+    " 2>"$shell_err"
   )
+
+  # Output is "<blank>\n<gw exit status>\n<pwd>". Reading the status explicitly
+  # means a case that failed to run cannot pass by comparing directories.
+  local gw_status
+  gw_status=$(sed -n '2p' <<<"$actual")
+  actual=$(tail -n 1 <<<"$actual")
 
   local status=ok
   [[ $expected == - ]] && expected=$root
@@ -64,11 +81,14 @@ check() {
   # physical paths on both sides.
   local want
   want=$(cd "$expected" 2>/dev/null && pwd -P) || want=$expected
-  [[ $actual == "$want" ]] || status=FAIL
+  [[ $gw_status == 0 && $actual == "$want" ]] || status=FAIL
 
   printf '%-5s %-6s %s\n' "$status" "$shell" "$description"
   if [[ $status == FAIL ]]; then
-    printf '      want %s\n      got  %s\n' "$want" "$actual"
+    printf '      want %s\ngot  %s\nexit %s\n' "$want" "$actual" "$gw_status"
+    # Show the binary's own message rather than letting a hard failure look
+    # like a navigation miss.
+    [[ -s $shell_err ]] && sed 's/^/      stderr: /' "$shell_err"
     failures=$((failures + 1))
   fi
 }
