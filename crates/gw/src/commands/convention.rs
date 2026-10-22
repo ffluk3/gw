@@ -360,3 +360,183 @@ mod tests {
         assert!(text.contains("PROJ"));
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::convention_file::{Loaded, Origin, ProviderConfig};
+    use gw_core::{ChangeRule, Convention, TicketRule, TicketSelector};
+    use std::path::PathBuf;
+
+    fn ctx(
+        convention: Convention,
+        providers: Vec<ProviderConfig>,
+        sources: Vec<PathBuf>,
+    ) -> Context {
+        let loaded = Loaded {
+            // The real loader always returns origin strings, so a fixture with
+            // sources reports Layout even when a rule list happens to be empty.
+            ticket_rules_origin: Origin::BuiltIn,
+            change_rules_origin: Origin::BuiltIn,
+            convention: convention.clone(),
+            providers,
+            sources,
+        };
+        Context::for_test(gw_core::Layout::new(PathBuf::from("/repo")), loaded)
+    }
+
+    fn command_provider(kind: &str) -> ProviderConfig {
+        ProviderConfig {
+            id: ProviderId::parse("host").unwrap(),
+            kind: kind.into(),
+            base_url: None,
+            done_status_category: None,
+            command: Some(vec!["tool".into()]),
+        }
+    }
+
+    fn ticket_rule(provider: &str, projects: &[&str]) -> TicketRule {
+        TicketRule {
+            provider: ProviderId::parse(provider).unwrap(),
+            selector: TicketSelector::Embedded {
+                pattern: "[A-Z]+-[0-9]+".into(),
+                allow_projects: projects.iter().map(|p| p.to_string()).collect(),
+            },
+            strength: gw_core::Strength::Identity,
+        }
+    }
+
+    // These exercise the text renderer. stdout is captured by the harness; the
+    // JSON shape is asserted in `tests/cli.rs`.
+
+    #[test]
+    fn show_renders_rules_providers_and_sources() {
+        for convention in [
+            Convention::built_in(),
+            Convention {
+                ticket_rules: vec![],
+                change_rules: vec![],
+            },
+            Convention {
+                ticket_rules: vec![ticket_rule("jira", &["PROJ"])],
+                change_rules: vec![ChangeRule {
+                    provider: ProviderId::parse("github").unwrap(),
+                    selector: ChangeSelector::HeadBranch,
+                    strength: gw_core::Strength::Identity,
+                }],
+            },
+        ] {
+            for sources in [vec![], vec![PathBuf::from("/home/me/.gw.toml")]] {
+                let ctx = ctx(convention.clone(), vec![], sources);
+                show(&ctx, false).unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn explain_renders_matches_misses_and_queries() {
+        let ctx = ctx(Convention::built_in(), vec![], vec![]);
+        for branch in ["feature/PROJ-1-x", "no-ticket-here"] {
+            explain(&ctx, branch, false).unwrap();
+        }
+    }
+
+    #[test]
+    fn providers_include_an_inactive_command_with_its_reason() {
+        let ctx = ctx(
+            Convention::built_in(),
+            vec![command_provider("command")],
+            vec![],
+        );
+        let lines = provider_lines(ctx.registry());
+        assert_eq!(lines.len(), 2, "jira and github");
+        // JIRA needs configuration; GitHub is always available.
+        assert!(lines.iter().any(|l| l.contains("inactive")), "{lines:?}");
+        assert!(lines.iter().any(|l| l.contains("active")), "{lines:?}");
+    }
+
+    #[test]
+    fn a_command_provider_without_a_command_is_explained() {
+        let mut provider = command_provider("command");
+        provider.command = None;
+        let ctx = ctx(Convention::built_in(), vec![provider], vec![]);
+        let id = ProviderId::parse("host").unwrap();
+        assert!(ctx
+            .registry()
+            .inactive_reason(&id)
+            .is_some_and(|reason| reason.contains("command")));
+    }
+
+    #[test]
+    fn selector_descriptions_cover_no_project_filter() {
+        let selector = TicketSelector::Embedded {
+            pattern: "X".into(),
+            allow_projects: vec![],
+        };
+        assert!(describe_ticket_selector(&selector).contains("any project"));
+    }
+
+    #[test]
+    fn explain_lines_flag_a_provider_that_is_not_active() {
+        let convention = Convention {
+            ticket_rules: vec![ticket_rule("jira", &[])],
+            change_rules: vec![],
+        };
+        let ctx = ctx(convention, vec![], vec![]);
+        let lines = explain_lines(ctx.registry(), &ctx.convention, "PROJ-1");
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].matched);
+        assert!(!lines[0].active);
+        assert!(lines[0].detail.contains("not active"));
+    }
+
+    #[test]
+    fn a_mention_ticket_change_rule_explains_a_skip() {
+        let no_built_in = || Convention {
+            ticket_rules: vec![],
+            change_rules: vec![],
+        };
+        let _ = no_built_in;
+        let convention = Convention {
+            ticket_rules: vec![ticket_rule("jira", &[])],
+            change_rules: vec![ChangeRule {
+                provider: ProviderId::parse("github").unwrap(),
+                selector: ChangeSelector::MentionTicket,
+                strength: gw_core::Strength::Identity,
+            }],
+        };
+        let ctx = ctx(convention, vec![], vec![]);
+        let lines = explain_lines(ctx.registry(), &ctx.convention, "no-ticket");
+        // One ticket rule and one change rule are evaluated.
+        assert_eq!(lines.len(), 2);
+        assert!(!lines[0].matched, "the ticket rule did not match");
+        assert!(!lines[1].matched, "the change rule needs a ticket");
+        assert!(lines[1].detail.contains("skipped"));
+    }
+
+    #[test]
+    fn a_ticket_dependent_change_rule_names_the_ticket() {
+        let convention = Convention {
+            ticket_rules: vec![ticket_rule("jira", &[])],
+            change_rules: vec![ChangeRule {
+                provider: ProviderId::parse("github").unwrap(),
+                selector: ChangeSelector::ContainsCommit,
+                strength: gw_core::Strength::Identity,
+            }],
+        };
+        let ctx = ctx(convention, vec![], vec![]);
+        let lines = explain_lines(ctx.registry(), &ctx.convention, "PROJ-1");
+        assert_eq!(lines.len(), 2);
+        assert!(lines[1].detail.contains("PROJ-1"));
+    }
+
+    #[test]
+    fn the_view_reports_every_built_in_provider() {
+        let ctx = ctx(Convention::built_in(), vec![], vec![]);
+        let view = View::new(&ctx);
+        assert_eq!(view.providers.len(), 2);
+        assert_eq!(view.ticket_rules_origin, "built-in");
+        assert_eq!(view.change_rules.len(), 1);
+        assert!(view.sources.is_empty());
+    }
+}

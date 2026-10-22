@@ -45,3 +45,39 @@ impl Outcome {
         self.code
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn columns_are_padded_to_the_widest_cell() {
+        let rows = vec![
+            ["a".to_string(), "bb".to_string()],
+            ["ccc".to_string(), "d".to_string()],
+        ];
+        assert_eq!(layout_rows(&rows), "a    bb\nccc  d\n");
+    }
+
+    #[test]
+    fn wide_glyphs_count_as_two_columns() {
+        let rows = vec![
+            ["漢".to_string(), "x".to_string()],
+            ["a".to_string(), "y".to_string()],
+        ];
+        assert_eq!(layout_rows(&rows), "漢  x\na   y\n");
+    }
+
+    #[test]
+    fn trailing_padding_is_trimmed() {
+        let rows = vec![["a".to_string(), "".to_string()]];
+        assert_eq!(layout_rows(&rows), "a\n");
+    }
+
+    #[test]
+    fn outcome_codes_are_contractual() {
+        assert_eq!(Outcome::ok().code(), 0);
+        assert_eq!(Outcome::partial().code(), 3);
+        assert_eq!(Outcome { code: 1 }.code(), 1);
+    }
+}

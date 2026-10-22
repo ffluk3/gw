@@ -171,3 +171,126 @@ mod tests {
         assert!(registry.inactive_reason(&github).is_none());
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::convention_file::{Loaded, ProviderConfig};
+
+    fn loaded_with(provider: ProviderConfig, rule_provider: &str) -> Loaded {
+        let id = ProviderId::parse(rule_provider).unwrap();
+        Loaded {
+            convention: gw_core::Convention {
+                ticket_rules: vec![gw_core::TicketRule {
+                    provider: id.clone(),
+                    selector: gw_core::TicketSelector::Embedded {
+                        pattern: "x-(?P<id>[0-9]+)".into(),
+                        allow_projects: vec![],
+                    },
+                    strength: gw_core::Strength::Identity,
+                }],
+                change_rules: vec![gw_core::ChangeRule {
+                    provider: id,
+                    selector: gw_core::ChangeSelector::HeadBranch,
+                    strength: gw_core::Strength::Identity,
+                }],
+            },
+            providers: vec![provider],
+            ..Loaded::default()
+        }
+    }
+
+    fn command_provider(id: &str, command: Option<Vec<String>>) -> ProviderConfig {
+        ProviderConfig {
+            id: ProviderId::parse(id).unwrap(),
+            kind: "command".into(),
+            base_url: None,
+            done_status_category: None,
+            command,
+        }
+    }
+
+    #[test]
+    fn a_command_provider_backs_whichever_rules_name_it() {
+        let loaded = loaded_with(command_provider("host", Some(vec!["tool".into()])), "host");
+        let registry = Registry::build(&loaded, Vec::new());
+        let id = ProviderId::parse("host").unwrap();
+        assert!(registry.ticket_provider(&id).is_some());
+        assert!(registry.change_provider(&id).is_some());
+        assert!(registry.inactive_reason(&id).is_none());
+    }
+
+    #[test]
+    fn a_command_without_argv_is_inactive_and_says_why() {
+        let loaded = loaded_with(command_provider("host", Some(vec![])), "host");
+        let registry = Registry::build(&loaded, Vec::new());
+        let id = ProviderId::parse("host").unwrap();
+        assert!(registry.ticket_provider(&id).is_none());
+        assert!(registry
+            .inactive_reason(&id)
+            .is_some_and(|reason| reason.contains("command")));
+    }
+
+    #[test]
+    fn a_command_named_by_no_rule_is_inactive_and_says_why() {
+        let loaded = loaded_with(
+            command_provider("orphan", Some(vec!["tool".into()])),
+            "host",
+        );
+        let registry = Registry::build(&loaded, Vec::new());
+        let id = ProviderId::parse("orphan").unwrap();
+        assert!(registry.ticket_provider(&id).is_none());
+        assert!(registry
+            .inactive_reason(&id)
+            .is_some_and(|reason| reason.contains("no convention rule")));
+    }
+
+    #[test]
+    fn a_skipped_command_provider_is_absent() {
+        let loaded = loaded_with(command_provider("host", Some(vec!["tool".into()])), "host");
+        let id = ProviderId::parse("host").unwrap();
+        let registry = Registry::build(&loaded, vec![id.clone()]);
+        assert!(registry.ticket_provider(&id).is_none());
+        assert!(registry.change_provider(&id).is_none());
+    }
+
+    #[test]
+    fn a_non_command_kind_is_not_added_as_a_command_provider() {
+        let mut config = command_provider("host", Some(vec!["tool".into()]));
+        config.kind = "jira".into();
+        let loaded = loaded_with(config, "host");
+        let registry = Registry::build(&loaded, Vec::new());
+        let id = ProviderId::parse("host").unwrap();
+        assert!(registry.ticket_provider(&id).is_none());
+    }
+
+    #[test]
+    fn github_is_active_unless_skipped() {
+        let github = ProviderId::parse("github").unwrap();
+        let active = Registry::build(&Default::default(), Vec::new());
+        assert!(active.change_provider(&github).is_some());
+    }
+
+    #[test]
+    fn a_configured_jira_adapter_requires_credentials() {
+        // Without the environment variables, even a base URL leaves it
+        // inactive: an adapter that cannot authenticate must not be active.
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+        let loaded = Loaded {
+            providers: vec![ProviderConfig {
+                id: ProviderId::parse("jira").unwrap(),
+                kind: "jira".into(),
+                base_url: Some("https://example.atlassian.net".into()),
+                done_status_category: None,
+                command: None,
+            }],
+            ..Loaded::default()
+        };
+        let registry = Registry::build(&loaded, Vec::new());
+        assert!(registry
+            .ticket_provider(&ProviderId::parse("jira").unwrap())
+            .is_none());
+    }
+}

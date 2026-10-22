@@ -30,11 +30,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # `llvm-tools-preview` is what cargo-llvm-cov instruments with. The
+      # pinned toolchain's profile is `minimal`, so the component is requested
+      # explicitly rather than assumed.
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.87.0"
-          components: clippy, rustfmt
+          components: clippy, rustfmt, llvm-tools-preview
 
       - name: Format
         run: cargo fmt --all -- --check
@@ -44,6 +47,20 @@ jobs:
 
       - name: Test
         run: cargo test --all
+
+      # Run the same suite once more under instrumentation and fail below the
+      # floor. cargo-llvm-cov merges the profiles written by the `gw` binary
+      # that the end-to-end tests spawn, so this measures the command layer too.
+      #
+      # One OS is enough: the suite is not platform-specific, and installing the
+      # tool on both runners doubles the job time for the same number.
+      - name: Install coverage tool
+        if: runner.os == 'Linux'
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: Coverage
+        if: runner.os == 'Linux'
+        run: cargo llvm-cov --all --fail-under-lines 95
 
       - name: Shellcheck
         if: runner.os == 'Linux'

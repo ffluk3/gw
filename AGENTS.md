@@ -88,6 +88,7 @@ about gradle in this project).
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
+cargo llvm-cov --all --fail-under-lines 95
 ```
 
 The full PR gate adds:
@@ -96,8 +97,36 @@ The full PR gate adds:
 ./scripts/check-commit-message.sh --range origin/main..HEAD
 ```
 
-CI (`ci.yml`) runs fmt, clippy, tests on Linux and macOS, and `shellcheck` on
-`install.sh` and `shell/gw.sh` on Linux. Keep shell changes shellcheck-clean.
+CI (`ci.yml`) runs fmt, clippy, tests on Linux and macOS, the coverage gate,
+and `shellcheck` on `install.sh` and `shell/gw.sh` on Linux. Keep shell changes
+shellcheck-clean.
+
+### Coverage
+
+Line coverage is a gate, not a target: **95% minimum**, enforced in CI and
+locally by the command above. `cargo-llvm-cov` is the only extra tool:
+
+```bash
+cargo install cargo-llvm-cov --locked
+```
+
+Two details make the number honest.
+
+- **The end-to-end tests count.** `crates/gw/tests/cli.rs` runs the real `gw`
+  binary, and `cargo-llvm-cov` merges the profile that binary writes. The
+  command layer is therefore measured even though the test process never calls
+  it directly. Do not replace those tests with in-process ones to raise a
+  number; they cover the code because they exercise the real path.
+- **External commands are faked at the process boundary, not mocked in code.**
+  The GitHub adapter runs `gh` and the JIRA adapter runs `curl`. The tests put
+  a stand-in early on `PATH` and let the real adapter build the arguments and
+  parse the response. A missing, failing, or malformed response must stay
+  `Unknown`: those tests are asserting the fail-closed rule, not just coverage.
+
+A test that mutates process environment (`PATH`, `TMPDIR`, `HOME`,
+`GW_REPOS_ROOT`) must hold a lock, because `cargo test` runs tests in parallel.
+Prefer an absolute program path (`/bin/cat`) over one resolved through `PATH`
+where the test does not need the override.
 
 ## Tests
 
@@ -108,9 +137,12 @@ CI (`ci.yml`) runs fmt, clippy, tests on Linux and macOS, and `shellcheck` on
 - `crates/gw-core/tests/props.rs` — generated-state safety invariants, phrased
   positively ("never destroys X unless Y held").
 - Unit tests live beside the module.
+- Adapter tests put a stand-in `gh` or `curl` early on `PATH` and run the real
+  binary, so argument building and response parsing are covered without a mock.
 
 When adding a rule, add the property that says what must never happen, not just
-an example that says what should.
+an example that says what should. See `docs/developer/testing.md` for the
+coverage gate and the environment-locking rule.
 
 ## Commit and release rules
 

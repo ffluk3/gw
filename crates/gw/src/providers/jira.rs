@@ -343,6 +343,49 @@ mod tests {
     }
 
     #[test]
+    fn configuration_without_a_base_url_or_credentials_is_inactive() {
+        // No provider table at all.
+        assert!(JiraRest::from_config(&crate::convention_file::Loaded::default()).is_none());
+
+        // A table without a base URL.
+        let missing_url = crate::convention_file::Loaded {
+            providers: vec![crate::convention_file::ProviderConfig {
+                id: ProviderId::parse("jira").unwrap(),
+                kind: "jira".into(),
+                base_url: None,
+                done_status_category: None,
+                command: None,
+            }],
+            ..Default::default()
+        };
+        assert!(JiraRest::from_config(&missing_url).is_none());
+
+        // A base URL but no credentials.
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+        let configured = crate::convention_file::Loaded {
+            providers: vec![crate::convention_file::ProviderConfig {
+                id: ProviderId::parse("jira").unwrap(),
+                kind: "jira".into(),
+                base_url: Some("https://example.atlassian.net/".into()),
+                done_status_category: None,
+                command: None,
+            }],
+            ..Default::default()
+        };
+        assert!(JiraRest::from_config(&configured).is_none());
+    }
+
+    #[test]
+    fn a_non_https_base_url_is_refused_without_running_curl() {
+        let mut adapter = adapter();
+        adapter.base_url = "http://example.atlassian.net".into();
+        let error = adapter.post("/rest/api/3/search/jql", "{}").unwrap_err();
+        assert!(error.to_string().contains("must be https"), "{error}");
+    }
+
+    #[test]
     fn empty_lookup_is_inert() {
         let observations = adapter().lookup(&[], Limits::default()).unwrap();
         assert!(observations.is_empty());

@@ -71,3 +71,15 @@ pub struct Unavailable {
     pub id: ProviderId,
     pub reason: String,
 }
+
+/// Serializes tests that change variables the adapters read from the process
+/// environment (`GW_JIRA_USER`, `GW_JIRA_API_TOKEN`). `cargo test` runs tests
+/// in parallel and the environment is shared, so a test that unset these would
+/// otherwise race one that expects them present.
+#[cfg(test)]
+pub(crate) mod test_support {
+    pub(crate) fn credential_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+}

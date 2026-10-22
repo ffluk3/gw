@@ -83,3 +83,50 @@ mod tests {
         assert_eq!(restore_hint("PROJ-1", "abc123"), "git branch PROJ-1 abc123");
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn every_reason_has_a_description_and_a_glyph() {
+        let reasons = [
+            Reason::Protected,
+            Reason::HarnessWorktree,
+            Reason::DetachedHead,
+            Reason::Prunable,
+            Reason::HasUnpublishedCommits,
+            Reason::HasUncommittedChanges,
+            Reason::StatusUnknown,
+            Reason::RecentlyActive { age_secs: 120 },
+            Reason::Stale { age_secs: 86_400 },
+            Reason::MergedPr,
+            Reason::TicketClosed {
+                resolution: "Fixed".into(),
+            },
+            Reason::NoMergedPr,
+        ];
+        for reason in &reasons {
+            assert!(!describe_reason(reason).is_empty(), "{reason:?}");
+            assert!(!glyph(reason).is_empty(), "{reason:?}");
+        }
+    }
+
+    #[test]
+    fn descriptions_use_the_documented_wording() {
+        assert_eq!(describe_reason(&Reason::Protected), "protected branch");
+        assert_eq!(describe_reason(&Reason::NoMergedPr), "no merged PR found");
+        assert_eq!(
+            describe_reason(&Reason::TicketClosed {
+                resolution: "Done".into()
+            }),
+            "ticket closed (Done)"
+        );
+        assert_eq!(
+            describe_reason(&Reason::Stale {
+                age_secs: 3 * 86_400
+            }),
+            "stale (3d ago)"
+        );
+    }
+}

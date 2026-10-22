@@ -62,6 +62,7 @@ nav:
       - The decision model: developer/decision-model.md
       - Repositories and discovery: developer/layout.md
       - Conventions and providers: developer/conventions.md
+      - Testing and coverage: developer/testing.md
       - Writing the docs: developer/docs-style.md
 
 markdown_extensions:

@@ -163,3 +163,100 @@ mod tests {
         assert!(summary_of(None).is_none());
     }
 }
+
+#[cfg(test)]
+mod snapshot_fixture {
+    use gw_core::{
+        Activity, ActivitySource, ChangeObservation, ChangeState, Dirty, Layout, ProviderId,
+        ReachableSet, RepoSnapshot, Strength, TicketId, TicketObservation, TicketStatus,
+        WorktreeKind, WorktreeSnapshot,
+    };
+
+    use super::print_table;
+
+    fn ticket(
+        status: TicketStatus,
+        strength: Strength,
+        summary: Option<&str>,
+    ) -> TicketObservation {
+        TicketObservation {
+            provider: ProviderId::parse("jira").unwrap(),
+            id: TicketId::parse("PROJ-1").unwrap(),
+            strength,
+            status,
+            summary: summary.map(str::to_string),
+        }
+    }
+
+    fn worktree(path: &str, kind: WorktreeKind) -> WorktreeSnapshot {
+        WorktreeSnapshot {
+            path: std::path::PathBuf::from(path),
+            branch: Some(gw_core::BranchName::parse("PROJ-1").unwrap()),
+            head: Some(gw_core::Sha::parse("aaaa").unwrap()),
+            kind,
+            dirty: Dirty::Clean,
+            activity: Activity {
+                age_secs: 120,
+                source: ActivitySource::CommitDate,
+            },
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        }
+    }
+
+    fn snapshot(worktrees: Vec<WorktreeSnapshot>) -> RepoSnapshot {
+        RepoSnapshot {
+            layout: Layout::new(std::path::PathBuf::from("/repo")),
+            default_branch: None,
+            head_branch: None,
+            protected: Default::default(),
+            reachable: ReachableSet::default(),
+            worktrees,
+            orphans: Vec::new(),
+        }
+    }
+
+    // The table and JSON printers write to stdout, which the test harness
+    // captures. These tests assert the branches are exercised without a panic;
+    // the JSON shape is covered end to end in `tests/cli.rs`.
+
+    #[test]
+    fn a_table_with_only_the_bare_entry_says_there_are_no_worktrees() {
+        print_table(&snapshot(vec![worktree("/repo/.bare", WorktreeKind::Main)]));
+    }
+
+    #[test]
+    fn a_table_reports_harness_prunable_closed_dirty_and_unknown_rows() {
+        let mut harness = worktree("/repo/wt/harness", WorktreeKind::Harness);
+        harness.activity.source = ActivitySource::Unknown;
+        harness.dirty = Dirty::Dirty;
+        harness.branch = None;
+
+        let mut prunable = worktree("/repo/wt/prunable", WorktreeKind::Prunable);
+        prunable.dirty = Dirty::Unknown;
+        prunable.tickets = vec![ticket(
+            TicketStatus::Closed {
+                resolution: Some("Done".into()),
+            },
+            Strength::Identity,
+            Some("Ship it"),
+        )];
+
+        let mut linked = worktree("/repo/wt/linked", WorktreeKind::Linked);
+        linked.tickets = vec![ticket(TicketStatus::NotChecked, Strength::Identity, None)];
+        linked.changes = vec![ChangeObservation {
+            provider: ProviderId::parse("github").unwrap(),
+            strength: Strength::Identity,
+            selector: "head_branch".into(),
+            branch: "PROJ-1".into(),
+            state: ChangeState::Merged { reference: None },
+        }];
+
+        print_table(&snapshot(vec![
+            worktree("/repo/.bare", WorktreeKind::Main),
+            harness,
+            prunable,
+            linked,
+        ]));
+    }
+}

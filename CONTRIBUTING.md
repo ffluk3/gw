@@ -125,8 +125,13 @@ git-ignored — never edit it by hand.
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
+cargo llvm-cov --all --fail-under-lines 95
 mkdocs build --strict
 ```
+
+Line coverage must stay at or above 95%, and CI fails below it. Install the
+tool once with `cargo install cargo-llvm-cov --locked`. The gate runs the same
+test suite; it does not need a separate set of tests.
 
 Run the docs build when you touch `docs/`, `mkdocs.yml`, or
 `requirements-docs.txt`. CI only runs the docs workflow for those paths, but a

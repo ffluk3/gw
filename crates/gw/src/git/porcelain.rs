@@ -205,3 +205,28 @@ branch refs/heads/feature/x
         assert!(parse_worktree_list("HEAD abc123\nbranch refs/heads/x\n").is_empty());
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn a_home_abbreviated_path_is_expanded() {
+        // `HOME` is present in every test environment.
+        let home = std::env::var_os("HOME").expect("HOME is set");
+        assert_eq!(expand_home("~"), PathBuf::from(&home));
+        assert_eq!(
+            expand_home("~/repos/x"),
+            PathBuf::from(&home).join("repos/x")
+        );
+        assert_eq!(expand_home("/absolute/x"), PathBuf::from("/absolute/x"));
+    }
+
+    #[test]
+    fn a_worktree_line_without_a_value_still_opens_a_block() {
+        // Defensive: a truncated block must not panic or leak into the next.
+        let entries = parse_worktree_list("worktree\nHEAD abc123\n");
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].path, PathBuf::from(""));
+    }
+}

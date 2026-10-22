@@ -41,3 +41,49 @@ impl From<std::io::Error> for Error {
         Error::Other(e.to_string())
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn every_variant_renders_a_message() {
+        assert_eq!(Error::Usage("u".into()).to_string(), "u");
+        assert_eq!(Error::Layout("l".into()).to_string(), "l");
+        assert_eq!(Error::Other("o".into()).to_string(), "o");
+        assert_eq!(
+            Error::Lookup {
+                service: "jira",
+                detail: "boom".into()
+            }
+            .to_string(),
+            "jira: boom"
+        );
+    }
+
+    #[test]
+    fn a_git_error_drops_empty_stderr() {
+        assert_eq!(
+            Error::Git {
+                context: "git status".into(),
+                stderr: "   ".into()
+            }
+            .to_string(),
+            "git status"
+        );
+        assert_eq!(
+            Error::Git {
+                context: "git status".into(),
+                stderr: "fatal".into()
+            }
+            .to_string(),
+            "git status: fatal"
+        );
+    }
+
+    #[test]
+    fn an_io_error_becomes_other() {
+        let io = std::io::Error::new(std::io::ErrorKind::NotFound, "gone");
+        assert_eq!(Error::from(io).to_string(), "gone");
+    }
+}

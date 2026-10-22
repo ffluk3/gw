@@ -483,3 +483,252 @@ mod tests {
         assert_eq!(config.command.unwrap(), vec!["tool", "--json"]);
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn a_higher_layer_replaces_only_the_fields_it_sets() {
+        let id = ProviderId::parse("jira").unwrap();
+        let mut lower = ProviderConfig {
+            id: id.clone(),
+            kind: "jira".into(),
+            base_url: Some("https://lower".into()),
+            done_status_category: Some("done".into()),
+            command: None,
+        };
+        lower.merge(ProviderConfig {
+            id,
+            kind: "command".into(),
+            base_url: None,
+            done_status_category: None,
+            command: Some(vec!["tool".into()]),
+        });
+        assert_eq!(lower.kind, "command");
+        assert_eq!(lower.base_url.as_deref(), Some("https://lower"));
+        assert_eq!(lower.done_status_category.as_deref(), Some("done"));
+        assert_eq!(lower.command.unwrap(), vec!["tool".to_string()]);
+    }
+
+    #[test]
+    fn a_file_without_a_convention_table_is_inert() {
+        let mut loaded = Loaded {
+            convention: Convention::built_in(),
+            ..Loaded::default()
+        };
+        apply(&mut loaded, File { convention: None }, Origin::Layout).unwrap();
+        assert_eq!(
+            loaded.convention.ticket_rules.len(),
+            1,
+            "the built-in rule survived"
+        );
+        assert_eq!(loaded.ticket_rules_origin, Origin::BuiltIn);
+    }
+
+    #[test]
+    fn provider_tables_merge_across_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(
+            &global,
+            "[convention.providers.jira]\nbase_url = \"https://global\"\n",
+        )
+        .unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+        std::fs::write(
+            layout.join(LAYOUT_FILE),
+            "[convention.providers.jira]\ndone_status_category = \"shipped\"\n",
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        let loaded = load(&layout).unwrap();
+        let jira = loaded
+            .providers
+            .iter()
+            .find(|p| p.id.as_str() == "jira")
+            .expect("jira was declared");
+        assert_eq!(jira.base_url.as_deref(), Some("https://global"));
+        assert_eq!(jira.done_status_category.as_deref(), Some("shipped"));
+        assert_eq!(loaded.sources.len(), 2);
+    }
+
+    #[test]
+    fn an_unreadable_file_is_a_usage_error() {
+        let dir = tempfile::tempdir().unwrap();
+        // A directory where a file is expected is readable-but-not-a-file.
+        let path = dir.path().join("gw.toml");
+        std::fs::create_dir_all(&path).unwrap();
+        assert!(matches!(File::load(&path), Err(Error::Usage(_))));
+    }
+
+    #[test]
+    fn a_missing_file_is_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(File::load(&dir.path().join("absent.toml"))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn parser_hints_name_the_replacement_for_legacy_keys() {
+        let with_hint = [
+            "jira = 1\n",
+            "[convention.providers.jira]\nproject = \"X\"\n",
+            "[convention]\nbase_url = 1\n",
+            "[convention]\nprovider = \"jira\"\n",
+        ];
+        for source in with_hint {
+            let error = toml::from_str::<File>(source)
+                .err()
+                .unwrap_or_else(|| panic!("accepted {source:?}"));
+            assert!(!hint(&error).is_empty(), "no hint for {error}");
+        }
+
+        // A shape error that no hint covers stays bare.
+        let error = toml::from_str::<File>("x = 1\n").unwrap_err();
+        assert!(hint(&error).is_empty());
+    }
+
+    #[test]
+    fn a_legacy_config_gets_a_targeted_hint() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gw.toml");
+        std::fs::write(&path, "[jira]\nbase_url = \"x\"\n").unwrap();
+        let error = File::load(&path).unwrap_err();
+        assert!(
+            error.to_string().contains("[convention.providers.jira]"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn a_provider_name_is_validated() {
+        // Parsing accepts any key; validation happens when the table is
+        // applied, so the file is otherwise valid.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("gw.toml");
+        std::fs::write(
+            &path,
+            "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = \"x\"\n\n[convention.providers.\"a:b\"]\nkind = \"command\"\n",
+        )
+        .unwrap();
+        let mut loaded = Loaded {
+            convention: Convention::built_in(),
+            ..Loaded::default()
+        };
+        let file = File::load(&path).unwrap().unwrap();
+        let error = apply(&mut loaded, file, Origin::Layout).unwrap_err();
+        assert!(
+            error.to_string().contains("invalid provider name"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn an_array_command_is_kept_verbatim() {
+        let table: ProviderTable =
+            toml::from_str("kind = \"command\"\ncommand = [\"tool\", \"--json\"]\n").unwrap();
+        let config = table.into_config(ProviderId::parse("linear").unwrap());
+        assert_eq!(config.command.unwrap(), vec!["tool", "--json"]);
+        // A provider without a kind borrows its id.
+        let bare: ProviderTable = toml::from_str("").unwrap();
+        assert_eq!(
+            bare.into_config(ProviderId::parse("linear").unwrap()).kind,
+            "linear"
+        );
+    }
+
+    #[test]
+    fn strength_values_convert() {
+        assert_eq!(Strength::from(StrengthValue::Identity), Strength::Identity);
+        assert_eq!(Strength::from(StrengthValue::Mention), Strength::Mention);
+    }
+
+    #[test]
+    fn rule_conversion_rejects_incomplete_rules() {
+        let no_pattern: TicketRuleTable =
+            toml::from_str("provider = \"jira\"\nselector = \"embedded\"\n").unwrap();
+        assert!(TicketRule::try_from(no_pattern).is_err());
+
+        let bad_provider: TicketRuleTable =
+            toml::from_str("provider = \"a:b\"\nselector = \"embedded\"\npattern = \"x\"\n")
+                .unwrap();
+        assert!(TicketRule::try_from(bad_provider).is_err());
+
+        let bad_change_provider: ChangeRuleTable =
+            toml::from_str("provider = \"a:b\"\nselector = \"head_branch\"\n").unwrap();
+        assert!(ChangeRule::try_from(bad_change_provider).is_err());
+
+        let unknown_selector: ChangeRuleTable =
+            toml::from_str("provider = \"github\"\nselector = \"nope\"\n").unwrap();
+        assert!(ChangeRule::try_from(unknown_selector).is_err());
+    }
+
+    #[test]
+    fn every_change_selector_name_is_accepted() {
+        for name in ["head_branch", "contains_commit", "mention_ticket"] {
+            let table: ChangeRuleTable =
+                toml::from_str(&format!("provider = \"github\"\nselector = \"{name}\"\n")).unwrap();
+            assert!(ChangeRule::try_from(table).is_ok(), "{name}");
+        }
+    }
+
+    #[test]
+    fn strength_is_read_from_a_rule() {
+        let table: TicketRuleTable = toml::from_str(
+            "provider = \"jira\"\nselector = \"embedded\"\npattern = \"x\"\nstrength = \"mention\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            TicketRule::try_from(table).unwrap().strength,
+            Strength::Mention
+        );
+    }
+
+    #[test]
+    fn layout_only_loading_ignores_the_global_layer() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(LAYOUT_FILE),
+            "[[convention.ticket_rules]]\nprovider = \"linear\"\nselector = \"embedded\"\npattern = \"x\"\n",
+        )
+        .unwrap();
+        let loaded = load_layout_only(dir.path()).unwrap();
+        assert_eq!(
+            loaded.convention.ticket_rules[0].provider.as_str(),
+            "linear"
+        );
+        assert_eq!(loaded.sources.len(), 1);
+    }
+
+    /// Point `GW_CONFIG` at one file for the duration of a test.
+    struct EnvGuard<'a> {
+        previous: Option<std::ffi::OsString>,
+        _lock: std::sync::MutexGuard<'a, ()>,
+    }
+
+    impl<'a> EnvGuard<'a> {
+        fn new(path: &Path) -> Self {
+            static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+            let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+            let previous = std::env::var_os(CONFIG_ENV);
+            std::env::set_var(CONFIG_ENV, path);
+            Self {
+                previous,
+                _lock: lock,
+            }
+        }
+    }
+
+    impl Drop for EnvGuard<'_> {
+        fn drop(&mut self) {
+            match self.previous.take() {
+                Some(value) => std::env::set_var(CONFIG_ENV, value),
+                None => std::env::remove_var(CONFIG_ENV),
+            }
+        }
+    }
+}

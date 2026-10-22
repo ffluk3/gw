@@ -321,3 +321,97 @@ mod tests {
             .is_none());
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn sha_short_is_bounded_by_the_value_and_the_width() {
+        let sha = Sha::parse("9df03e38ae0").unwrap();
+        assert_eq!(sha.short(4), "9df0");
+        assert_eq!(sha.short(100), "9df03e38ae0");
+    }
+
+    #[test]
+    fn sha_display_is_the_value() {
+        assert_eq!(Sha::parse("ABCD").unwrap().to_string(), "abcd");
+    }
+
+    #[test]
+    fn sha_rejects_bad_shapes() {
+        assert!(Sha::parse("abc").is_err(), "too short");
+        assert!(Sha::parse(&"a".repeat(65)).is_err(), "too long");
+        assert!(Sha::parse("zzzz").is_err(), "not hexadecimal");
+    }
+
+    #[test]
+    fn branch_name_rejects_bad_shapes() {
+        for bad in [
+            "",
+            "-x",
+            "a..b",
+            "a//b",
+            "trailing/",
+            "x.lock",
+            "x.LOCK",
+            "trailing.",
+            "has space",
+            "a~b",
+            "a^b",
+            "a:b",
+            "a?b",
+            "a*b",
+            "a[b",
+            "a\\b",
+            "a\"b",
+            "a'b",
+            "a{b",
+            "a}b",
+            "a(b",
+            "a)b",
+            "a@b",
+            "a\u{7}b",
+        ] {
+            assert!(BranchName::parse(bad).is_err(), "accepted {bad:?}");
+        }
+    }
+
+    #[test]
+    fn branch_name_accepts_slashes_and_dots() {
+        assert_eq!(
+            BranchName::parse(" feature/x.y ").unwrap().as_str(),
+            "feature/x.y"
+        );
+        assert_eq!(BranchName::parse("main").unwrap().as_str(), "main");
+    }
+
+    #[test]
+    fn branch_name_display_is_the_value() {
+        assert_eq!(BranchName::parse("PROJ-1").unwrap().to_string(), "PROJ-1");
+    }
+
+    #[test]
+    fn ticket_ids_reject_bad_shapes() {
+        assert!(TicketId::parse("").is_err());
+        assert!(TicketId::parse("  ").is_err());
+        assert!(TicketId::parse(&"x".repeat(129)).is_err());
+        assert!(TicketId::parse("has space").is_err());
+        assert!(TicketId::parse("has\u{7}bell").is_err());
+    }
+
+    #[test]
+    fn ticket_id_keeps_its_value_and_lookup_key() {
+        let id = TicketId::parse(" PROJ-1 ").unwrap();
+        assert_eq!(id.as_str(), "PROJ-1");
+        assert_eq!(id.lookup_key(), "PROJ-1");
+        assert_eq!(id.to_string(), "PROJ-1");
+    }
+
+    #[test]
+    fn a_lone_prefix_never_becomes_a_ticket() {
+        // No digits after the dash, and a prefix too short to satisfy the rule.
+        assert!(BranchName::parse("PROJ-").unwrap().ticket_key().is_none());
+        assert!(BranchName::parse("X-1").unwrap().ticket_key().is_none());
+    }
+}

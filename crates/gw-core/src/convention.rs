@@ -560,3 +560,157 @@ mod tests {
         assert_eq!(providers.len(), 1);
     }
 }
+
+#[cfg(test)]
+mod edge_cases {
+    use super::*;
+
+    fn rule(provider: &str, pattern: &str, strength: Strength) -> TicketRule {
+        TicketRule {
+            provider: ProviderId::parse(provider).unwrap(),
+            selector: TicketSelector::Embedded {
+                pattern: pattern.to_string(),
+                allow_projects: Vec::new(),
+            },
+            strength,
+        }
+    }
+
+    #[test]
+    fn provider_ids_reject_bad_shapes() {
+        assert!(ProviderId::parse(&"x".repeat(65)).is_err());
+        assert!(ProviderId::parse("a\tb").is_err());
+        assert!(ProviderId::parse("a\\b").is_err());
+        assert!(ProviderId::parse("a b").is_err());
+        assert!(ProviderId::parse("a\nb").is_err());
+    }
+
+    #[test]
+    fn provider_id_display_is_the_slug() {
+        assert_eq!(ProviderId::parse(" JIRA ").unwrap().to_string(), "jira");
+    }
+
+    #[test]
+    fn strength_names_are_stable() {
+        assert_eq!(Strength::Identity.as_str(), "identity");
+        assert_eq!(Strength::Mention.as_str(), "mention");
+    }
+
+    #[test]
+    fn change_selector_names_are_stable() {
+        assert_eq!(ChangeSelector::HeadBranch.as_str(), "head_branch");
+        assert_eq!(ChangeSelector::ContainsCommit.as_str(), "contains_commit");
+        assert_eq!(ChangeSelector::MentionTicket.as_str(), "mention_ticket");
+        assert_eq!(
+            TicketSelector::Embedded {
+                pattern: "x".into(),
+                allow_projects: vec![]
+            }
+            .as_str(),
+            "embedded"
+        );
+    }
+
+    #[test]
+    fn a_rule_without_a_strength_defaults_to_identity() {
+        assert_eq!(default_strength(), Strength::Identity);
+
+        let ticket: TicketRule = serde_json::from_str(
+            r#"{"provider":"jira","selector":{"selector":"embedded","pattern":"x"}}"#,
+        )
+        .unwrap();
+        assert_eq!(ticket.strength, Strength::Identity);
+
+        let change: ChangeRule =
+            serde_json::from_str(r#"{"provider":"github","selector":{"selector":"head_branch"}}"#)
+                .unwrap();
+        assert_eq!(change.strength, Strength::Identity);
+    }
+
+    #[test]
+    fn every_ticket_rule_contributes_its_observation() {
+        // Two rules for the same provider both match, but the resolved set is
+        // deduplicated by (provider, id), so one ref survives per identity.
+        let convention = Convention {
+            ticket_rules: vec![
+                rule("jira", r"[A-Z]+-[0-9]+", Strength::Identity),
+                rule("jira", r"alt-(?P<id>[0-9]+)", Strength::Identity),
+            ],
+            change_rules: vec![],
+        };
+        let resolution = convention.resolve("PROJ-1-alt-2");
+        assert_eq!(resolution.tickets.len(), 2, "two distinct ids");
+        assert_eq!(resolution.primary_ticket().unwrap().id.as_str(), "PROJ-1");
+    }
+
+    #[test]
+    fn a_ticket_rule_that_does_not_match_is_skipped() {
+        let convention = Convention {
+            ticket_rules: vec![
+                rule("jira", r"nope-[0-9]+", Strength::Identity),
+                rule("jira", r"[A-Z]+-[0-9]+", Strength::Identity),
+            ],
+            change_rules: vec![],
+        };
+        assert_eq!(
+            convention
+                .resolve("PROJ-1")
+                .primary_ticket()
+                .unwrap()
+                .id
+                .as_str(),
+            "PROJ-1"
+        );
+    }
+
+    #[test]
+    fn ticket_providers_is_empty_without_tickets() {
+        assert!(Convention::built_in()
+            .resolve("no-ticket")
+            .ticket_providers()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_captured_group_is_preferred_over_the_whole_match() {
+        let selector = TicketSelector::Embedded {
+            pattern: r"eng-(?P<id>[0-9]+)".into(),
+            allow_projects: vec![],
+        };
+        assert_eq!(selector.select("eng-42").unwrap().as_str(), "42");
+    }
+
+    #[test]
+    fn a_pattern_without_a_group_returns_the_whole_match() {
+        let selector = TicketSelector::Embedded {
+            pattern: r"[A-Z]+-[0-9]+".into(),
+            allow_projects: vec![],
+        };
+        assert_eq!(
+            selector.select("feature/PROJ-7").unwrap().as_str(),
+            "PROJ-7"
+        );
+    }
+
+    #[test]
+    fn a_rejected_candidate_advances_past_its_end() {
+        let selector = TicketSelector::Embedded {
+            pattern: r"[A-Z]+-[0-9]+".into(),
+            allow_projects: vec!["PROJ".into()],
+        };
+        // `OTHER-1` is rejected, then `PROJ-2` must still be found.
+        assert_eq!(
+            selector.select("OTHER-1-PROJ-2").unwrap().as_str(),
+            "PROJ-2"
+        );
+        // A rejected candidate that ends the string yields nothing, rather
+        // than rescanning its interior.
+        assert!(selector.select("OTHER-1").is_none());
+    }
+
+    #[test]
+    fn an_invalid_pattern_fails_validation() {
+        assert!(validate_pattern("([").is_err());
+        assert!(validate_pattern(r"[A-Z]+-[0-9]+").is_ok());
+    }
+}

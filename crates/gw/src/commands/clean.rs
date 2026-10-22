@@ -261,7 +261,7 @@ mod tests {
     use gw_core::model::{BranchName, Sha};
     use gw_core::Plan;
 
-    fn args(yes: bool, dry_run: bool) -> CleanArgs {
+    pub(super) fn args(yes: bool, dry_run: bool) -> CleanArgs {
         CleanArgs {
             dry_run,
             yes,
@@ -273,7 +273,7 @@ mod tests {
 
     /// A plan with one destructive entry: enough for `should_apply` to be
     /// willing to act.
-    fn destructive_plan() -> Plan {
+    pub(super) fn destructive_plan() -> Plan {
         Plan {
             entries: vec![(
                 Target::Branch {
@@ -287,7 +287,7 @@ mod tests {
         }
     }
 
-    fn non_destructive_plan() -> Plan {
+    pub(super) fn non_destructive_plan() -> Plan {
         Plan {
             entries: vec![(
                 Target::Branch {
@@ -334,6 +334,97 @@ mod tests {
             &args(false, false),
             &destructive_plan(),
             true
+        ));
+    }
+}
+
+#[cfg(test)]
+mod render_tests {
+    use super::tests::{args, destructive_plan, non_destructive_plan};
+    use super::*;
+    use gw_core::decision::Reason;
+    use gw_core::model::BranchName;
+
+    fn worktree(branch: Option<&str>) -> Target {
+        Target::Worktree {
+            path: std::path::PathBuf::from("/repo/worktrees/PROJ-1"),
+            branch: branch.map(|b| BranchName::parse(b).unwrap()),
+        }
+    }
+
+    fn branch(name: &str) -> Target {
+        Target::Branch {
+            name: BranchName::parse(name).unwrap(),
+        }
+    }
+
+    #[test]
+    fn recommendations_are_printed_for_both_target_shapes() {
+        let mut plan = Plan::new();
+        plan.push(
+            worktree(Some("PROJ-1")),
+            Decision::Recommend {
+                reason: Reason::TicketClosed {
+                    resolution: "Done".into(),
+                },
+            },
+        );
+        plan.push(
+            worktree(None),
+            Decision::Recommend {
+                reason: Reason::TicketClosed {
+                    resolution: "Done".into(),
+                },
+            },
+        );
+        plan.push(
+            branch("PROJ-2"),
+            Decision::Recommend {
+                reason: Reason::TicketClosed {
+                    resolution: "Fixed".into(),
+                },
+            },
+        );
+        print_recommendations(&plan);
+    }
+
+    #[test]
+    fn a_plan_without_recommendations_prints_nothing() {
+        let mut plan = Plan::new();
+        plan.push(
+            branch("PROJ-1"),
+            Decision::Keep {
+                reason: Reason::Protected,
+            },
+        );
+        print_recommendations(&plan);
+    }
+
+    fn stdin_is_a_terminal() -> bool {
+        use std::io::IsTerminal;
+        std::io::stdout().is_terminal()
+    }
+
+    #[test]
+    fn interactive_confirmation_depends_on_a_terminal() {
+        // Under `cargo test` stdout is a pipe, so the interactive arm must not
+        // apply; when run in a terminal it may. Either way the call is total.
+        let apply = should_apply(&args(false, false), &destructive_plan(), false);
+        assert_eq!(apply, stdin_is_a_terminal());
+        // A dry run never applies, whatever the terminal says.
+        assert!(!should_apply(
+            &args(false, true),
+            &destructive_plan(),
+            false
+        ));
+    }
+
+    #[test]
+    fn a_non_destructive_plan_runs_nothing() {
+        assert!(!should_apply(
+            &args(false, false),
+            &non_destructive_plan(),
+            false
         ));
     }
 }

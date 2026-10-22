@@ -125,3 +125,150 @@ pub fn decide(verdict: Verdict<'_>, policy: &Policy) -> Decision {
         },
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::layout::Layout;
+    use crate::snapshot::{
+        Activity, Dirty, ReachableSet, RepoSnapshot, TicketObservation, TicketStatus,
+        WorktreeSnapshot,
+    };
+    use crate::{ProviderId, TicketId};
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+
+    fn sha(raw: &str) -> Sha {
+        Sha::parse(raw).unwrap()
+    }
+
+    fn snapshot() -> RepoSnapshot {
+        RepoSnapshot {
+            layout: Layout::new(PathBuf::from("/repo")),
+            default_branch: Some(crate::model::BranchName::parse("develop").unwrap()),
+            head_branch: None,
+            protected: BTreeSet::new(),
+            reachable: ReachableSet::new(vec![sha("aaaa")]),
+            worktrees: Vec::new(),
+            orphans: Vec::new(),
+        }
+    }
+
+    fn worktree(branch: Option<&str>, kind: WorktreeKind) -> WorktreeSnapshot {
+        WorktreeSnapshot {
+            path: PathBuf::from("/repo/worktrees/x"),
+            branch: branch.map(|b| crate::model::BranchName::parse(b).unwrap()),
+            head: Some(sha("aaaa")),
+            kind,
+            dirty: Dirty::Clean,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        }
+    }
+
+    fn policy() -> Policy {
+        Policy::default()
+    }
+
+    #[test]
+    fn a_harness_worktree_is_skipped() {
+        let wt = worktree(Some("PROJ-1"), WorktreeKind::Harness);
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::Harness);
+        assert!(matches!(
+            decide(Verdict::Harness, &policy()),
+            Decision::Skip {
+                reason: Reason::HarnessWorktree
+            }
+        ));
+    }
+
+    #[test]
+    fn a_detached_head_is_skipped() {
+        let wt = worktree(None, WorktreeKind::Linked);
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::Detached);
+        assert!(matches!(
+            decide(Verdict::Detached, &policy()),
+            Decision::Skip {
+                reason: Reason::DetachedHead
+            }
+        ));
+    }
+
+    #[test]
+    fn a_protected_default_branch_worktree_is_kept() {
+        let wt = worktree(Some("develop"), WorktreeKind::Linked);
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::Protected);
+        assert!(matches!(
+            decide(Verdict::Protected, &policy()),
+            Decision::Keep {
+                reason: Reason::Protected
+            }
+        ));
+    }
+
+    #[test]
+    fn a_prunable_worktree_is_pruned() {
+        let wt = worktree(Some("PROJ-1"), WorktreeKind::Prunable);
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::Prunable);
+        assert!(matches!(
+            decide(Verdict::Prunable, &policy()),
+            Decision::Prune {
+                reason: Reason::Prunable
+            }
+        ));
+    }
+
+    #[test]
+    fn a_worktree_without_a_head_is_status_unknown() {
+        let mut wt = worktree(Some("PROJ-1"), WorktreeKind::Linked);
+        wt.head = None;
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::StatusUnknown);
+    }
+
+    #[test]
+    fn a_closed_ticket_is_removed_only_when_the_policy_allows_it() {
+        let mut wt = worktree(Some("PROJ-1"), WorktreeKind::Linked);
+        wt.tickets.push(TicketObservation {
+            provider: ProviderId::parse("jira").unwrap(),
+            id: TicketId::parse("PROJ-1").unwrap(),
+            strength: crate::convention::Strength::Identity,
+            status: TicketStatus::Closed {
+                resolution: Some("Done".into()),
+            },
+            summary: None,
+        });
+        // The worktree is clean, published, has no merged change, and its
+        // activity source is unknown, so the closed ticket is the only signal.
+        assert!(matches!(
+            verdict(&wt, &snapshot(), &policy()),
+            Verdict::TicketClosed { .. }
+        ));
+
+        assert!(matches!(
+            decide(Verdict::TicketClosed { resolution: "Done" }, &policy()),
+            Decision::Recommend { .. }
+        ));
+
+        let permissive = Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        };
+        assert!(matches!(
+            decide(Verdict::TicketClosed { resolution: "Done" }, &permissive),
+            Decision::Remove { .. }
+        ));
+    }
+
+    #[test]
+    fn no_signal_is_kept() {
+        let wt = worktree(Some("PROJ-1"), WorktreeKind::Linked);
+        assert_eq!(verdict(&wt, &snapshot(), &policy()), Verdict::NoSignal);
+        assert!(matches!(
+            decide(Verdict::NoSignal, &policy()),
+            Decision::Keep {
+                reason: Reason::NoMergedPr
+            }
+        ));
+    }
+}

@@ -189,7 +189,7 @@ mod tests {
     use super::*;
     use gw_core::{ChangeRule, Convention, Strength};
 
-    fn query(branch: &str) -> ChangeQuery {
+    pub(super) fn query(branch: &str) -> ChangeQuery {
         Convention {
             ticket_rules: vec![],
             change_rules: vec![ChangeRule {
@@ -231,5 +231,138 @@ mod tests {
     #[test]
     fn query_keys_are_stable() {
         assert_eq!(query("PROJ-1").key(), "github:head_branch:PROJ-1");
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::tests::query;
+    use super::*;
+    use crate::commands::snapshot::RepoRef;
+
+    fn repo() -> RepoRef {
+        RepoRef::from_remote(Some("git@github.com:acme/widgets.git".into()))
+    }
+
+    fn head_query() -> ChangeQuery {
+        query("PROJ-1")
+    }
+
+    #[test]
+    fn default_is_the_same_as_new() {
+        assert_eq!(GhCli::default().id().as_str(), "github");
+    }
+
+    /// Tests that rewrite `PATH` must not run at the same time.
+    fn path_lock() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn a_remote_without_a_github_slug_is_an_error() {
+        let provider = GhCli::new();
+        let error = ChangeProvider::lookup(
+            &provider,
+            &RepoRef::from_remote(Some("https://gitlab.com/acme/widgets.git".into())),
+            &[head_query()],
+            Limits::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("not a GitHub remote"), "{error}");
+
+        let no_remote = ChangeProvider::lookup(
+            &provider,
+            &RepoRef::from_remote(None),
+            &[head_query()],
+            Limits::default(),
+        )
+        .unwrap_err();
+        assert!(no_remote.to_string().contains("(no origin)"), "{no_remote}");
+    }
+
+    #[test]
+    fn a_non_head_branch_selector_is_unknown_without_running_gh() {
+        let provider = GhCli::new();
+        let mut mention = head_query();
+        mention.selector = ChangeSelector::MentionTicket;
+        let answers = provider.query_chunk("acme/widgets", &[mention]).unwrap();
+        assert_eq!(answers.len(), 1);
+        assert!(matches!(answers[0].1, ChangeState::Unknown { .. }));
+
+        // A batch with only an unimplemented selector never spawns `gh`.
+        let empty = provider.query_chunk("acme/widgets", &[]).unwrap();
+        assert!(empty.is_empty());
+    }
+
+    #[test]
+    fn queries_that_are_not_head_branch_are_answered_alongside_real_ones() {
+        // `gh` is replaced by a script that answers one merged PR, so the head
+        // branch query runs while the mention query is answered locally.
+        let scripts = tempfile::tempdir().unwrap();
+        let gh = scripts.path().join("gh");
+        std::fs::write(
+            &gh,
+            "#!/bin/sh\ncat > /dev/null\necho '{\"data\":{\"b0\":{\"issueCount\":1}}}'\n",
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&gh, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let _lock = path_lock();
+        let previous = std::env::var_os("PATH").unwrap_or_default();
+        std::env::set_var(
+            "PATH",
+            format!(
+                "{}:{}",
+                scripts.path().display(),
+                previous.to_string_lossy()
+            ),
+        );
+
+        let provider = GhCli::new();
+        let mut mention = head_query();
+        mention.selector = ChangeSelector::MentionTicket;
+        let mut head = head_query();
+        head.branch = "PROJ-2".into();
+        let answers = provider.query_chunk("acme/widgets", &[mention, head]);
+
+        std::env::set_var("PATH", previous);
+        let answers = answers.unwrap();
+        assert_eq!(answers.len(), 2, "every query gets an answer");
+        assert!(matches!(answers[0].1, ChangeState::Unknown { .. }));
+        assert!(matches!(answers[1].1, ChangeState::Merged { .. }));
+    }
+
+    #[test]
+    fn a_repo_ref_with_a_slug_passes_the_slug_to_the_query() {
+        assert_eq!(repo().slug.as_deref(), Some("acme/widgets"));
+    }
+
+    #[test]
+    fn a_batch_larger_than_the_limit_is_chunked() {
+        let provider = GhCli::new();
+        let queries: Vec<ChangeQuery> = (0..3)
+            .map(|i| {
+                let mut q = head_query();
+                q.branch = format!("PROJ-{i}");
+                q
+            })
+            .collect();
+        // An unimplemented selector makes each chunk answer without spawning
+        // `gh`, so this exercises chunking with a Count of every answer.
+        let queries: Vec<ChangeQuery> = queries
+            .into_iter()
+            .map(|mut q| {
+                q.selector = ChangeSelector::MentionTicket;
+                q
+            })
+            .collect();
+        let observations =
+            ChangeProvider::lookup(&provider, &repo(), &queries, Limits { max_queries: 2 })
+                .unwrap();
+        assert_eq!(observations.len(), 3);
     }
 }

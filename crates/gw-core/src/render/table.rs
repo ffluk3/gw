@@ -125,3 +125,97 @@ mod tests {
         assert_eq!(display_width("\u{fe0f}"), 0);
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::model::{BranchName, Sha};
+    use std::path::PathBuf;
+
+    fn plan() -> Plan {
+        let sha = Sha::parse("9df03e38ae0").unwrap();
+        let mut plan = Plan::new();
+        plan.push(
+            Target::Worktree {
+                path: PathBuf::from("/repo/worktrees/PROJ-1"),
+                branch: Some(BranchName::parse("PROJ-1").unwrap()),
+            },
+            Decision::Remove {
+                reason: crate::decision::Reason::MergedPr,
+            },
+        );
+        plan.push(
+            Target::Worktree {
+                path: PathBuf::from("/repo/worktrees/detached"),
+                branch: None,
+            },
+            Decision::Prune {
+                reason: crate::decision::Reason::Prunable,
+            },
+        );
+        plan.push(
+            Target::Branch {
+                name: BranchName::parse("PROJ-2").unwrap(),
+            },
+            Decision::Delete {
+                reason: crate::decision::Reason::Stale { age_secs: 1 },
+                tip: sha,
+            },
+        );
+        plan.push(
+            Target::Branch {
+                name: BranchName::parse("PROJ-3").unwrap(),
+            },
+            Decision::Keep {
+                reason: crate::decision::Reason::Protected,
+            },
+        );
+        plan.push(
+            Target::Branch {
+                name: BranchName::parse("PROJ-4").unwrap(),
+            },
+            Decision::Skip {
+                reason: crate::decision::Reason::DetachedHead,
+            },
+        );
+        plan.push(
+            Target::Branch {
+                name: BranchName::parse("PROJ-5").unwrap(),
+            },
+            Decision::Recommend {
+                reason: crate::decision::Reason::NoMergedPr,
+            },
+        );
+        plan
+    }
+
+    #[test]
+    fn the_table_names_every_action_and_shape() {
+        let rendered = render_table(&plan());
+        assert!(rendered.contains("remove"), "{rendered}");
+        assert!(rendered.contains("prune"), "{rendered}");
+        assert!(rendered.contains("delete"), "{rendered}");
+        assert!(rendered.contains("keep"), "{rendered}");
+        assert!(rendered.contains("skip"), "{rendered}");
+        assert!(rendered.contains("recommend"), "{rendered}");
+        assert!(rendered.contains("(detached)"), "{rendered}");
+        // A branch target has no path, and is shown as an em dash.
+        assert!(rendered.contains("—"), "{rendered}");
+    }
+
+    #[test]
+    fn status_rows_drop_trailing_empties() {
+        assert_eq!(
+            render_status_row("PROJ-1", "1d ago", true, Some("PROJ-1"), Some("Fix it")),
+            "PROJ-1\t1d ago\t●\tPROJ-1\tFix it"
+        );
+        assert_eq!(
+            render_status_row("PROJ-1", "1d ago", false, Some("PROJ-1"), None),
+            "PROJ-1\t1d ago\t \tPROJ-1\t"
+        );
+        assert_eq!(
+            render_status_row("PROJ-1", "1d ago", false, None, None),
+            "PROJ-1\t1d ago\t \t"
+        );
+    }
+}

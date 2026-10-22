@@ -1565,3 +1565,642 @@ selector = "head_branch"
         "the open worktree was removed: the first answer was applied to both"
     );
 }
+
+// ---- built-in providers through their real command boundary ---------------
+//
+// The GitHub adapter shells out to `gh` and the JIRA adapter to `curl`. Putting
+// a stand-in early on `PATH` exercises the real argument building, response
+// parsing, and error handling without a network call or a mock in the code.
+
+/// Write an executable script and return the directory to put on `PATH`.
+fn fake_binary(dir: &Path, name: &str, body: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path
+}
+
+/// Run `gw` with `dir` prepended to `PATH`.
+fn gw_with_fakes(cwd: &Path, args: &[&str], dir: &Path, env: &[(&str, &str)]) -> Output {
+    let path = std::env::var("PATH").unwrap_or_default();
+    let mut entries: Vec<(&str, String)> =
+        env.iter().map(|(k, v)| (*k, (*v).to_string())).collect();
+    entries.push(("PATH", format!("{}:{path}", dir.display())));
+    let refs: Vec<(&str, &str)> = entries.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    gw_with_env(cwd, args, &refs)
+}
+
+/// Point `origin` at a GitHub URL, which is what makes the GitHub adapter pick
+/// up the repository. The fixture's real origin is a local path, so this is
+/// done after the branch is published.
+fn pretend_origin_is_github(fx: &Fixture) {
+    run(
+        &fx.bare(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "git@github.com:acme/widgets.git",
+        ],
+    );
+}
+
+#[test]
+fn a_merged_github_pr_removes_the_worktree() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    // GraphQL answers `b0.issueCount`. Anything else is a protocol failure.
+    fake_binary(
+        scripts.path(),
+        "gh",
+        // `develop` is the first query and `PROJ-40` the second; only the
+        // branch under test is merged.
+        r#"cat > /dev/null
+echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":1}}}'"#,
+    );
+    let wt = fx.add_worktree("PROJ-40");
+    fx.publish("PROJ-40");
+    pretend_origin_is_github(&fx);
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--yes", "--json"],
+        scripts.path(),
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert!(
+        !wt.exists(),
+        "a merged PR did not remove the worktree: {json}\nstderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn an_open_github_pr_leaves_the_worktree_alone() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    fake_binary(
+        scripts.path(),
+        "gh",
+        r#"cat > /dev/null
+echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":0}}}'"#,
+    );
+    let wt = fx.add_worktree("PROJ-41");
+    fx.publish("PROJ-41");
+    pretend_origin_is_github(&fx);
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--yes", "--json"],
+        scripts.path(),
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(wt.exists(), "an open PR removed the worktree");
+}
+
+#[test]
+fn a_gh_failure_is_reported_and_never_reads_as_merged() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    fake_binary(
+        scripts.path(),
+        "gh",
+        "cat > /dev/null\necho nope >&2\nexit 2",
+    );
+    let wt = fx.add_worktree("PROJ-42");
+    fx.publish("PROJ-42");
+    pretend_origin_is_github(&fx);
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--yes", "--json", "--stale-days", "0"],
+        scripts.path(),
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert!(
+        !json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["action"] == "remove" && e["reason"] == "merged_pr"),
+        "a gh failure produced a merge: {json}"
+    );
+    let _ = wt;
+}
+
+#[test]
+fn a_malformed_gh_response_never_reads_as_merged() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    fake_binary(
+        scripts.path(),
+        "gh",
+        "cat > /dev/null\necho '{\"data\":{}}'",
+    );
+    let wt = fx.add_worktree("PROJ-43");
+    fx.publish("PROJ-43");
+    pretend_origin_is_github(&fx);
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--yes", "--json", "--stale-days", "0"],
+        scripts.path(),
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert!(
+        !json["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["reason"] == "merged_pr"),
+        "a missing count produced a merge: {json}"
+    );
+    let _ = wt;
+}
+
+/// A JIRA base URL and credentials, so the adapter activates.
+fn jira_layout(fx: &Fixture, base_url: &str) {
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            "[convention.providers.jira]\nbase_url = \"{base_url}\"\n\n\
+             [[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\n\
+             pattern = '[A-Z][A-Z0-9]+-[0-9]+'\n\n\
+             [[convention.change_rules]]\nprovider = \"github\"\nselector = \"head_branch\"\n"
+        ),
+    )
+    .unwrap();
+}
+
+fn jira_env(fx: &Fixture) -> Vec<(&'static str, &str)> {
+    vec![
+        ("GW_REPO", fx.root.to_str().unwrap()),
+        ("GW_JIRA_USER", "user@example.com"),
+        ("GW_JIRA_API_TOKEN", "token"),
+    ]
+}
+
+#[test]
+fn a_closed_jira_ticket_is_reportable_and_removable() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "https://jira.example.test");
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+echo '{"issues":[{"key":"PROJ-50","fields":{"status":{"statusCategory":{"key":"done"}},"resolution":{"name":"Fixed"},"summary":"Ship it"}}]}'"#,
+    );
+    let wt = fx.add_worktree("PROJ-50");
+    fx.publish("PROJ-50");
+
+    // Without --closed the ticket is a recommendation, not a removal.
+    let planned = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--json", "--skip-provider", "github"],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(planned.code, 0, "stderr: {}", planned.stderr);
+    let json: serde_json::Value = serde_json::from_str(&planned.stdout).expect("valid json");
+    assert_eq!(json["counts"]["recommended"], json!(1), "{json}");
+    assert!(wt.is_dir());
+
+    let applied = gw_with_fakes(
+        &fx.bare(),
+        &[
+            "clean",
+            "--yes",
+            "--closed",
+            "--json",
+            "--skip-provider",
+            "github",
+        ],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(applied.code, 0, "stderr: {}", applied.stderr);
+    assert!(!wt.exists(), "a closed ticket did not remove the worktree");
+}
+
+#[test]
+fn jira_ticket_summary_reaches_the_status_output() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "https://jira.example.test");
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+echo '{"issues":[{"key":"PROJ-51","fields":{"status":{"statusCategory":{"key":"indeterminate"}},"summary":"Add rate limiting"}}]}'"#,
+    );
+    fx.add_worktree("PROJ-51");
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["status", "--json", "--skip-provider", "github"],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    let row = json["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "PROJ-51")
+        .expect("row");
+    assert_eq!(row["summary"], "Add rate limiting");
+    assert_eq!(row["ticket_state"]["status"], "open");
+}
+
+#[test]
+fn jira_errors_and_odd_responses_degrade_to_unknown() {
+    let fx = Fixture::new();
+    jira_layout(&fx, "https://jira.example.test");
+    fx.add_worktree("PROJ-52");
+
+    for body in [
+        // A tracker error message.
+        r#"cat > /dev/null
+echo '{"errorMessages":["no such project"]}'"#,
+        // Invalid JSON.
+        "cat > /dev/null\necho not-json",
+        // A non-zero curl exit.
+        "cat > /dev/null\necho boom >&2\nexit 22",
+        // A response with no status category.
+        r#"cat > /dev/null
+echo '{"issues":[{"key":"PROJ-52","fields":{"summary":"no status"}}]}'"#,
+    ] {
+        let scripts = tempfile::tempdir().unwrap();
+        fake_binary(scripts.path(), "curl", body);
+        let out = gw_with_fakes(
+            &fx.bare(),
+            &["status", "--json", "--skip-provider", "github"],
+            scripts.path(),
+            &jira_env(&fx),
+        );
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        let json: serde_json::Value = serde_json::from_str(&out.stdout)
+            .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+        let row = json["worktrees"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|w| w["branch"] == "PROJ-52")
+            .expect("row");
+        assert_eq!(
+            row["ticket_state"]["status"], "unknown",
+            "an untrustworthy answer was read as a state: {row}"
+        );
+    }
+}
+
+#[test]
+fn a_non_https_jira_base_url_is_refused_before_any_request() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "http://jira.example.test");
+    // A curl that would succeed if it ever ran.
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+echo '{"issues":[]}'"#,
+    );
+    fx.add_worktree("PROJ-53");
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["status", "--json", "--skip-provider", "github"],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    let row = json["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "PROJ-53")
+        .expect("row");
+    assert!(
+        row["ticket_state"]["detail"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("https"),
+        "the base URL was not refused: {row}"
+    );
+}
+
+#[test]
+fn a_ticket_the_tracker_does_not_return_is_unknown() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "https://jira.example.test");
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+echo '{"issues":[]}'"#,
+    );
+    fx.add_worktree("PROJ-54");
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["status", "--json", "--skip-provider", "github"],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    let row = json["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "PROJ-54")
+        .expect("row");
+    assert_eq!(row["ticket_state"]["status"], "unknown");
+}
+
+#[test]
+fn a_github_remote_that_is_not_github_is_explained() {
+    let fx = Fixture::new();
+    run(
+        &fx.bare(),
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "https://gitlab.com/acme/widgets.git",
+        ],
+    );
+    fx.add_worktree("PROJ-55");
+
+    let out = fx.gw(&["clean", "--json", "--stale-days", "0"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str::<serde_json::Value>(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+    assert!(
+        out.stderr.contains("not a GitHub remote"),
+        "the reason was not reported: {}",
+        out.stderr
+    );
+}
+
+// ---- human output, add branches, and repos tables ---------------------------
+
+#[test]
+fn status_renders_a_table_at_the_layout_root() {
+    let fx = Fixture::new();
+    fx.add_worktree("PROJ-60");
+
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("BRANCH"), "{}", out.stdout);
+    assert!(out.stdout.contains("SUMMARY"), "{}", out.stdout);
+    assert!(out.stdout.contains("PROJ-60"), "{}", out.stdout);
+}
+
+#[test]
+fn clean_renders_a_table_and_a_dry_run_notice() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-61");
+    fx.publish("PROJ-61");
+
+    let out = fx.gw(&[
+        "clean",
+        "--dry-run",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("ACTION"), "{}", out.stdout);
+    assert!(out.stdout.contains("Dry run"), "{}", out.stdout);
+    assert!(wt.is_dir());
+}
+
+#[test]
+fn clean_reports_a_closed_ticket_as_a_recommendation() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "https://jira.example.test");
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+echo '{"issues":[{"key":"PROJ-62","fields":{"status":{"statusCategory":{"key":"done"}},"resolution":{"name":"Fixed"},"summary":"Ship it"}}]}'"#,
+    );
+    let wt = fx.add_worktree("PROJ-62");
+    fx.publish("PROJ-62");
+
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["clean", "--skip-provider", "github"],
+        scripts.path(),
+        &jira_env(&fx),
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("can be removed with --closed"),
+        "{}",
+        out.stdout
+    );
+    assert!(wt.is_dir());
+}
+
+#[test]
+fn add_fetches_by_default_and_creates_a_remote_tracking_branch() {
+    let fx = Fixture::new();
+    // Publish a branch on origin that has no local ref yet.
+    run(&fx.bare(), &["branch", "remote-only", "develop"]);
+    fx.publish("remote-only");
+    run(&fx.bare(), &["branch", "-D", "remote-only"]);
+
+    let out = fx.gw(&["add", "remote-only", "--print-path"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(fx.root.join("worktrees/remote-only").is_dir());
+}
+
+#[test]
+fn add_fast_forwards_a_behind_local_branch() {
+    let fx = Fixture::new();
+    // A local branch with no worktree, and an origin ref that is ahead of it.
+    run(&fx.bare(), &["branch", "ff-test", "develop"]);
+    let scratch = fx.add_worktree("advance");
+    run(&scratch, &["commit", "--allow-empty", "-m", "ahead"]);
+    run(&fx.bare(), &["push", "origin", "advance:ff-test"]);
+    run(&fx.bare(), &["fetch", "origin"]);
+    run(
+        &fx.bare(),
+        &["worktree", "remove", scratch.to_str().unwrap()],
+    );
+
+    let out = fx.gw(&["add", "ff-test", "--print-path"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    // The fast-forward pulled origin's commit onto the local ref.
+    let local = std::process::Command::new("git")
+        .args(["-C", fx.bare().to_str().unwrap(), "rev-parse", "ff-test"])
+        .output()
+        .unwrap();
+    let remote = std::process::Command::new("git")
+        .args([
+            "-C",
+            fx.bare().to_str().unwrap(),
+            "rev-parse",
+            "origin/ff-test",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(local.stdout, remote.stdout);
+}
+
+#[test]
+fn a_lock_failure_in_clean_removes_what_it_can() {
+    let fx = Fixture::new();
+    let locked = fx.add_worktree("PROJ-64");
+    let free = fx.add_worktree("PROJ-65");
+    fx.publish("PROJ-64");
+    fx.publish("PROJ-65");
+    run(&fx.bare(), &["worktree", "lock", locked.to_str().unwrap()]);
+
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(out.code, 3, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("could not remove"), "{}", out.stderr);
+    assert!(!free.is_dir());
+}
+
+#[test]
+fn a_failed_branch_delete_is_reported() {
+    let fx = Fixture::new();
+    // A branch with no checkout and a published tip is a delete candidate.
+    run(&fx.bare(), &["branch", "PROJ-66", "develop"]);
+    fx.publish("PROJ-66");
+    // Remove the ref underneath the plan so the delete fails at apply time.
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--delete-branches",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("Deleted branches"), "{}", out.stdout);
+}
+
+#[test]
+fn repos_renders_a_table_with_and_without_dirty_counts() {
+    let fx = Fixture::new();
+    let outer = tempfile::tempdir().unwrap();
+    let repos = outer.path().join("repos");
+    link_layout(&fx, &repos, "acme/widgets");
+    std::fs::write(
+        repos.join("acme/widgets/.gw.toml"),
+        "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = '[A-Z]+-[0-9]+'\nallow_projects = [\"PROJ\"]\n",
+    )
+    .unwrap();
+
+    let plain = gw_with_env(
+        outer.path(),
+        &["repos"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(plain.code, 0, "stderr: {}", plain.stderr);
+    assert!(plain.stdout.contains("Layouts under"), "{}", plain.stdout);
+    assert!(plain.stdout.contains("jira:PROJ"), "{}", plain.stdout);
+
+    let dirty = gw_with_env(
+        outer.path(),
+        &["repos", "--dirty"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(dirty.code, 0, "stderr: {}", dirty.stderr);
+    assert!(dirty.stdout.contains("DIRTY"), "{}", dirty.stdout);
+
+    let json = gw_with_env(
+        outer.path(),
+        &["repos", "--dirty", "--json"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(json.code, 0, "stderr: {}", json.stderr);
+    let doc: serde_json::Value = serde_json::from_str(&json.stdout).expect("valid json");
+    assert!(doc["repos"][0]["dirty"].is_number(), "{doc}");
+}
+
+#[test]
+fn repos_says_so_when_the_root_holds_no_layouts() {
+    let empty = tempfile::tempdir().unwrap();
+    let root = empty.path().join("repos");
+    std::fs::create_dir_all(&root).unwrap();
+    let out = gw_with_env(
+        empty.path(),
+        &["repos"],
+        &[("GW_REPOS_ROOT", root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("No layouts under"), "{}", out.stdout);
+}
+
+#[test]
+fn convention_show_renders_text() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["convention", "show"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(out.stdout.contains("Convention in force"), "{}", out.stdout);
+    assert!(out.stdout.contains("Providers"), "{}", out.stdout);
+}
+
+#[test]
+fn convention_explain_renders_text_for_a_miss() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["convention", "explain", "no-ticket-here"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains("Branch: no-ticket-here"),
+        "{}",
+        out.stdout
+    );
+    assert!(out.stdout.contains("Would query"), "{}", out.stdout);
+}
+
+#[test]
+fn init_refuses_a_file_at_the_target_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = source_repo(tmp.path());
+    let root = tmp.path().join("occupied");
+    std::fs::write(&root, "not a directory").unwrap();
+
+    let out = gw_raw(
+        tmp.path(),
+        &[
+            "init",
+            src.to_str().unwrap(),
+            "--dir",
+            root.to_str().unwrap(),
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("is not a directory"), "{}", out.stderr);
+}

@@ -65,6 +65,25 @@ impl Context {
         &self.registry
     }
 
+    /// Build a context from already-resolved parts.
+    ///
+    /// Test-only: the real constructor owns discovery and file loading, which
+    /// a unit test of a renderer should not have to reproduce.
+    #[cfg(test)]
+    pub(crate) fn for_test(layout: Layout, loaded: crate::convention_file::Loaded) -> Self {
+        let git = CliGit::new(layout.bare.clone());
+        let registry = Registry::build(&loaded, Vec::new());
+        let convention = loaded.convention.clone();
+        Self {
+            git,
+            layout,
+            convention,
+            loaded,
+            registry,
+            json: false,
+        }
+    }
+
     /// Whether output should be machine-readable.
     ///
     /// `--json` always wins; otherwise a non-TTY stdout assumes a script.
@@ -108,4 +127,68 @@ fn infer_worktrees_dir(
         .into_iter()
         .max_by_key(|(_, count)| *count)
         .map(|(path, _)| path)
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::cli::Command;
+    use crate::git::WorktreeEntry;
+
+    fn entry(path: &str, bare: bool) -> WorktreeEntry {
+        WorktreeEntry {
+            path: std::path::PathBuf::from(path),
+            head: None,
+            branch: None,
+            bare,
+            detached: false,
+            prunable: false,
+        }
+    }
+
+    #[test]
+    fn the_worktrees_dir_is_inferred_from_direct_children() {
+        let layout = Layout::new(std::path::PathBuf::from("/repo"));
+        let entries = [
+            entry("/repo/worktrees/a", false),
+            entry("/repo/worktrees/b", false),
+            entry("/repo/worktrees/c", false),
+            entry("/repo/other/d", false),
+            entry("/repo/.bare/.claude/worktrees/agent", false),
+            entry("/repo/wt-e", false),
+            entry("/repo/.bare", true),
+            entry("/", false),
+        ];
+        assert_eq!(
+            infer_worktrees_dir(&entries, &layout),
+            Some(std::path::PathBuf::from("/repo/worktrees"))
+        );
+    }
+
+    #[test]
+    fn no_direct_children_means_no_guess() {
+        let layout = Layout::new(std::path::PathBuf::from("/repo"));
+        let entries = [
+            entry("/repo/.bare", true),
+            entry("/repo/other/deep/x", false),
+            entry("/", false),
+        ];
+        assert!(infer_worktrees_dir(&entries, &layout).is_none());
+        assert!(infer_worktrees_dir(&[], &layout).is_none());
+    }
+
+    #[test]
+    fn skip_providers_ignores_invalid_slugs() {
+        let cli = Cli {
+            repo: None,
+            json: false,
+            no_color: false,
+            skip_provider: vec!["github".into(), "a:b".into(), " jira ".into()],
+            command: Command::Status(crate::cli::StatusArgs {}),
+        };
+        let skipped = skip_providers(&cli);
+        assert_eq!(skipped.len(), 2);
+        assert_eq!(skipped[0].as_str(), "github");
+        assert_eq!(skipped[1].as_str(), "jira");
+    }
 }

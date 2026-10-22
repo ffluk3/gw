@@ -177,8 +177,8 @@ pub fn now_epoch() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use super::coverage_tests::FakeGit;
     use super::*;
-    use std::path::PathBuf;
 
     #[test]
     fn slug_from_ssh_remote() {
@@ -218,7 +218,12 @@ mod tests {
         let dir = layout_root();
         let root = std::fs::canonicalize(dir.path()).unwrap();
 
-        let layout = resolve_layout(Some(&root.join(".bare")), Path::new("/x"), &NoGit).unwrap();
+        let layout = resolve_layout(
+            Some(&root.join(".bare")),
+            Path::new("/x"),
+            &FakeGit::default(),
+        )
+        .unwrap();
         assert_eq!(layout.root, root);
     }
 
@@ -227,45 +232,66 @@ mod tests {
         let dir = layout_root();
         let root = std::fs::canonicalize(dir.path()).unwrap();
 
-        let layout = resolve_layout(Some(&root), Path::new("/x"), &NoGit).unwrap();
+        let layout = resolve_layout(Some(&root), Path::new("/x"), &FakeGit::default()).unwrap();
         assert_eq!(layout.bare, root.join(".bare"));
     }
+}
 
-    struct NoGit;
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
 
-    impl GitBackend for NoGit {
+    /// A backend with no repository facts. Every method is unused by
+    /// `resolve_layout` except `common_dir`, so those are `unreachable!()`
+    /// rather than `unimplemented!()`: they are never part of the path under
+    /// test and should not count against coverage.
+    #[derive(Default)]
+    pub(super) struct FakeGit {
+        common: Option<PathBuf>,
+    }
+
+    impl FakeGit {
+        pub(super) fn with_common_dir(path: PathBuf) -> Self {
+            Self { common: Some(path) }
+        }
+    }
+
+    impl GitBackend for FakeGit {
         fn common_dir(&self, _: &Path) -> Result<PathBuf, Error> {
-            Err(Error::Other("unused".into()))
+            match &self.common {
+                Some(path) => Ok(path.clone()),
+                None => Err(Error::Other("unused".into())),
+            }
         }
         fn worktree_list(&self) -> Result<Vec<crate::git::WorktreeEntry>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not list worktrees")
         }
         fn status(&self, _: &Path) -> Result<gw_core::Dirty, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read status")
         }
         fn rev_list_remotes(&self) -> Result<Vec<gw_core::Sha>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not list remotes")
         }
         fn for_each_branch(&self, _: i64) -> Result<Vec<crate::git::backend::BranchEntry>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not list branches")
         }
         fn default_branch(&self) -> Result<Option<gw_core::BranchName>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read the default branch")
         }
         fn head_branch(&self) -> Result<Option<gw_core::BranchName>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read HEAD")
         }
         fn ref_exists(&self, _: &gw_core::BranchName) -> Result<bool, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read refs")
         }
         fn remote_ref_exists(&self, _: &gw_core::BranchName) -> Result<bool, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read refs")
         }
         fn fetch_prune(&self) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not fetch")
         }
         fn fast_forward_to_remote(&self, _: &gw_core::BranchName) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not mutate branches")
         }
         fn worktree_add(
             &self,
@@ -273,22 +299,109 @@ mod tests {
             _: &gw_core::BranchName,
             _: crate::git::AddMode,
         ) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not add worktrees")
         }
         fn worktree_remove(&self, _: &Path) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not remove worktrees")
         }
         fn worktree_prune(&self) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not prune worktrees")
         }
         fn branch_delete(&self, _: &gw_core::BranchName) -> Result<(), Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not delete branches")
         }
         fn remote_url(&self) -> Result<Option<String>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read the remote URL")
         }
         fn last_commit_epoch(&self, _: &Path) -> Result<Option<i64>, Error> {
-            unimplemented!()
+            unreachable!("resolve_layout does not read commit dates")
         }
+    }
+
+    fn layout_root() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let bare = dir.path().join(".bare");
+        std::fs::create_dir_all(&bare).unwrap();
+        std::fs::write(bare.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_root_without_a_parent_is_a_usage_error() {
+        assert!(matches!(
+            resolve_layout(
+                Some(Path::new(".bare")),
+                Path::new("/x"),
+                &FakeGit::default()
+            ),
+            Err(Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn standing_in_the_layout_root_is_recognized() {
+        let dir = layout_root();
+        let layout = resolve_layout(None, dir.path(), &FakeGit::default()).unwrap();
+        assert_eq!(layout.root, dir.path());
+    }
+
+    #[test]
+    fn a_non_layout_directory_names_its_layouts() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("acme/widgets");
+        std::fs::create_dir_all(nested.join(".bare")).unwrap();
+        std::fs::write(nested.join(".bare/HEAD"), "ref: refs/heads/main\n").unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+
+        let error = resolve_layout(Some(dir.path()), &elsewhere, &FakeGit::default()).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("is not a gw layout"), "{message}");
+        assert!(message.contains("acme/widgets"), "{message}");
+        assert!(message.contains("--repo <name>"), "{message}");
+    }
+
+    #[test]
+    fn a_directory_that_is_not_a_repository_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let error = resolve_layout(None, dir.path(), &FakeGit::default()).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("no git repository here"), "{message}");
+        assert!(message.contains("gw init"), "{message}");
+    }
+
+    #[test]
+    fn a_plain_clone_is_rejected_with_a_way_forward() {
+        let clone = tempfile::tempdir().unwrap();
+        let common = clone.path().join(".git");
+        std::fs::create_dir_all(&common).unwrap();
+        let error =
+            resolve_layout(None, clone.path(), &FakeGit::with_common_dir(common)).unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("different layout"), "{message}");
+        assert!(message.contains("gw --repo"), "{message}");
+    }
+
+    #[test]
+    fn an_ancestor_layout_root_is_found_from_a_subdirectory() {
+        let dir = layout_root();
+        // The subdirectory is not itself a repo, and `common_dir` fails; the
+        // ancestor containing `.bare/HEAD` is the answer.
+        let sub = dir.path().join("notes");
+        std::fs::create_dir_all(&sub).unwrap();
+        let layout = resolve_layout(None, &sub, &FakeGit::default()).unwrap();
+        assert_eq!(layout.root, dir.path());
+    }
+
+    #[test]
+    fn display_path_is_relative_when_inside_the_root() {
+        assert_eq!(
+            display_path(Path::new("/repo/worktrees/x"), Path::new("/repo")),
+            "worktrees/x"
+        );
+        assert_eq!(
+            display_path(Path::new("/elsewhere/x"), Path::new("/repo")),
+            "/elsewhere/x"
+        );
     }
 }

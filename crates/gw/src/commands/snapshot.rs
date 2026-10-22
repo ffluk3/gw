@@ -363,3 +363,290 @@ pub fn is_managed(layout: &Layout, path: &std::path::Path) -> bool {
     let target = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     target.starts_with(&managed)
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use gw_core::{ChangeRule, ChangeSelector, ChangeState, Sha, TicketRule, TicketSelector};
+
+    fn sha(raw: &str) -> Sha {
+        Sha::parse(raw).unwrap()
+    }
+
+    fn observation(provider: &str, id: &str) -> TicketObservation {
+        TicketObservation {
+            provider: ProviderId::parse(provider).unwrap(),
+            id: TicketId::parse(id).unwrap(),
+            strength: Strength::Identity,
+            status: TicketStatus::Open,
+            summary: Some("from the provider".into()),
+        }
+    }
+
+    fn snapshot(worktrees: Vec<WorktreeSnapshot>) -> RepoSnapshot {
+        RepoSnapshot {
+            layout: Layout::new(std::path::PathBuf::from("/repo")),
+            default_branch: None,
+            head_branch: None,
+            protected: Default::default(),
+            reachable: Default::default(),
+            worktrees,
+            orphans: Vec::new(),
+        }
+    }
+
+    fn worktree(branch: Option<&str>, kind: WorktreeKind) -> WorktreeSnapshot {
+        WorktreeSnapshot {
+            path: std::path::PathBuf::from("/repo/worktrees/x"),
+            branch: branch.map(|b| BranchName::parse(b).unwrap()),
+            head: Some(sha("aaaa")),
+            kind,
+            dirty: Dirty::Clean,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        }
+    }
+
+    fn nothing() -> OrgGuard {
+        OrgGuard
+    }
+
+    struct OrgGuard;
+
+    impl Drop for OrgGuard {
+        fn drop(&mut self) {}
+    }
+
+    #[test]
+    fn an_answered_ticket_keeps_the_conventions_strength() {
+        let convention = Convention {
+            ticket_rules: vec![TicketRule {
+                provider: ProviderId::parse("jira").unwrap(),
+                selector: TicketSelector::Embedded {
+                    pattern: "[A-Z]+-[0-9]+".into(),
+                    allow_projects: vec![],
+                },
+                strength: Strength::Mention,
+            }],
+            change_rules: vec![],
+        };
+        let mut snap = snapshot(vec![worktree(Some("PROJ-1"), WorktreeKind::Linked)]);
+        let observations = vec![observation("jira", "PROJ-1")];
+
+        attach_tickets(&mut snap, &convention, &observations);
+
+        let ticket = &snap.worktrees[0].tickets[0];
+        assert_eq!(
+            ticket.strength,
+            Strength::Mention,
+            "provider strength leaked"
+        );
+        assert_eq!(ticket.summary.as_deref(), Some("from the provider"));
+    }
+
+    #[test]
+    fn an_unanswered_ticket_is_not_checked() {
+        let convention = Convention::built_in();
+        let mut snap = snapshot(vec![worktree(Some("PROJ-1"), WorktreeKind::Linked)]);
+        attach_tickets(&mut snap, &convention, &[]);
+        let ticket = &snap.worktrees[0].tickets[0];
+        assert_eq!(ticket.status, TicketStatus::NotChecked);
+    }
+
+    #[test]
+    fn ticket_refs_are_sorted_and_deduplicated() {
+        let convention = Convention::built_in();
+        let snap = snapshot(vec![
+            worktree(Some("PROJ-2"), WorktreeKind::Linked),
+            worktree(Some("PROJ-1"), WorktreeKind::Linked),
+            worktree(Some("PROJ-1"), WorktreeKind::Prunable),
+            worktree(None, WorktreeKind::Linked),
+        ]);
+        let refs = ticket_refs(&snap, &convention);
+        let ids: Vec<&str> = refs.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["PROJ-1", "PROJ-2"]);
+    }
+
+    #[test]
+    fn change_queries_skip_unqueryable_kinds() {
+        let convention = Convention::built_in();
+        let snap = snapshot(vec![
+            worktree(Some("main"), WorktreeKind::Main),
+            worktree(Some("PROJ-1"), WorktreeKind::Harness),
+            worktree(Some("PROJ-2"), WorktreeKind::Linked),
+            worktree(None, WorktreeKind::Linked),
+            worktree(Some("PROJ-3"), WorktreeKind::Prunable),
+        ]);
+        let queries = change_queries(&snap, &convention);
+        let branches: Vec<&str> = queries.iter().map(|q| q.branch.as_str()).collect();
+        assert_eq!(branches, vec!["PROJ-2", "PROJ-3"]);
+    }
+
+    #[test]
+    fn attaching_changes_matches_provider_selector_and_branch() {
+        let convention = Convention::built_in();
+        let mut snap = snapshot(vec![worktree(Some("PROJ-1"), WorktreeKind::Linked)]);
+        let github = ProviderId::parse("github").unwrap();
+        let answer = ChangeObservation {
+            provider: github.clone(),
+            strength: Strength::Mention,
+            selector: "head_branch".into(),
+            branch: "PROJ-1".into(),
+            state: ChangeState::Merged { reference: None },
+        };
+
+        // A provider that is not named by the convention is ignored.
+        attach_changes(
+            &mut snap,
+            &convention,
+            &[(ProviderId::parse("other").unwrap(), vec![answer.clone()])],
+        );
+        assert!(snap.worktrees[0].changes.is_empty());
+
+        attach_changes(&mut snap, &convention, &[(github, vec![answer])]);
+        assert_eq!(snap.worktrees[0].changes.len(), 1);
+        // Strength always comes from the query.
+        assert_eq!(snap.worktrees[0].changes[0].strength, Strength::Identity);
+    }
+
+    #[test]
+    fn grouping_preserves_first_appearance_order() {
+        let refs = vec![
+            TicketRef {
+                provider: ProviderId::parse("jira").unwrap(),
+                id: TicketId::parse("PROJ-1").unwrap(),
+                strength: Strength::Identity,
+                selector: "embedded".into(),
+            },
+            TicketRef {
+                provider: ProviderId::parse("linear").unwrap(),
+                id: TicketId::parse("ENG-2").unwrap(),
+                strength: Strength::Identity,
+                selector: "embedded".into(),
+            },
+            TicketRef {
+                provider: ProviderId::parse("jira").unwrap(),
+                id: TicketId::parse("PROJ-3").unwrap(),
+                strength: Strength::Identity,
+                selector: "embedded".into(),
+            },
+        ];
+        let grouped = tickets_by_provider(&refs);
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].0.as_str(), "jira");
+        assert_eq!(grouped[0].1.len(), 2);
+
+        let queries: Vec<ChangeQuery> = convention_queries(&["PROJ-1", "PROJ-2", "ENG-9"]);
+        let grouped = queries_by_provider(&queries);
+        assert_eq!(grouped.len(), 1);
+        assert_eq!(grouped[0].1.len(), 3);
+    }
+
+    fn convention_queries(branches: &[&str]) -> Vec<ChangeQuery> {
+        let convention = Convention::built_in();
+        branches
+            .iter()
+            .flat_map(|branch| convention.resolve(branch).changes)
+            .collect()
+    }
+
+    #[test]
+    fn an_inactive_provider_is_reported_and_skipped() {
+        let registry = Registry::build(&Default::default(), Vec::new());
+        let refs = vec![TicketRef {
+            provider: ProviderId::parse("jira").unwrap(),
+            id: TicketId::parse("PROJ-1").unwrap(),
+            strength: Strength::Identity,
+            selector: "embedded".into(),
+        }];
+        // No JIRA adapter is configured, so this yields no observation.
+        assert!(observe_tickets(&registry, &refs, Limits::default()).is_empty());
+
+        let queries = convention_queries(&["PROJ-1"]);
+        let skipped = Registry::build(
+            &Default::default(),
+            vec![ProviderId::parse("github").unwrap()],
+        );
+        let repo = RepoRef::from_remote(None);
+        assert!(observe_changes(&skipped, &repo, &queries, Limits::default()).is_empty());
+    }
+
+    #[test]
+    fn a_failing_provider_becomes_unknown_observations() {
+        // Point a command provider at a program this process cannot run, so
+        // the lookup fails at spawn time and the error path runs end to end.
+        let loaded = crate::convention_file::Loaded {
+            convention: Convention {
+                ticket_rules: vec![TicketRule {
+                    provider: ProviderId::parse("host").unwrap(),
+                    selector: TicketSelector::Embedded {
+                        pattern: "[A-Z]+-[0-9]+".into(),
+                        allow_projects: vec![],
+                    },
+                    strength: Strength::Identity,
+                }],
+                change_rules: vec![ChangeRule {
+                    provider: ProviderId::parse("host").unwrap(),
+                    selector: ChangeSelector::HeadBranch,
+                    strength: Strength::Identity,
+                }],
+            },
+            providers: vec![crate::convention_file::ProviderConfig {
+                id: ProviderId::parse("host").unwrap(),
+                kind: "command".into(),
+                base_url: None,
+                done_status_category: None,
+                command: Some(vec!["/definitely/not-a-real-binary".into()]),
+            }],
+            ..Default::default()
+        };
+        let registry = Registry::build(&loaded, Vec::new());
+        let refs = vec![TicketRef {
+            provider: ProviderId::parse("host").unwrap(),
+            id: TicketId::parse("PROJ-1").unwrap(),
+            strength: Strength::Identity,
+            selector: "embedded".into(),
+        }];
+        let observations = observe_tickets(&registry, &refs, Limits::default());
+        assert_eq!(observations.len(), 1);
+        assert!(matches!(
+            observations[0].status,
+            TicketStatus::Unknown { .. }
+        ));
+
+        let queries = loaded.convention.resolve("PROJ-1").changes;
+        let repo = RepoRef::from_remote(None);
+        let observed = observe_changes(&registry, &repo, &queries, Limits::default());
+        assert_eq!(observed.len(), 1);
+        assert!(matches!(
+            observed[0].1[0].state,
+            ChangeState::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn a_repo_ref_derives_a_slug_only_for_github() {
+        assert_eq!(
+            RepoRef::from_remote(Some("git@github.com:acme/widgets.git".into()))
+                .slug
+                .as_deref(),
+            Some("acme/widgets")
+        );
+        assert!(RepoRef::from_remote(Some("https://gitlab.com/a/b".into()))
+            .slug
+            .is_none());
+        let _ = nothing();
+    }
+
+    #[test]
+    fn a_managed_path_is_inside_the_worktrees_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let layout = Layout::new(dir.path().to_path_buf());
+        std::fs::create_dir_all(&layout.worktrees).unwrap();
+        let inside = layout.worktrees.join("PROJ-1");
+        std::fs::create_dir_all(&inside).unwrap();
+        assert!(is_managed(&layout, &inside));
+        assert!(!is_managed(&layout, &dir.path().join("elsewhere")));
+    }
+}

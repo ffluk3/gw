@@ -17,6 +17,8 @@ git internals and Rust. If you only want to *use* `gw`, the
 
 Then, before you change behavior:
 
+- **[Testing and coverage](testing.md)** — how the suite is built, and the 95%
+  line-coverage gate CI enforces.
 - **[Writing the docs](docs-style.md)** — the rules these pages are held to.
 
 ## The contract in one place

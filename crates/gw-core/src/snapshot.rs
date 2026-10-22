@@ -356,3 +356,145 @@ mod tests {
         assert!(!a.is_older_than(8 * 86_400));
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn sha(raw: &str) -> Sha {
+        Sha::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn dirty_states_have_names() {
+        assert_eq!(Dirty::Clean.as_str(), "clean");
+        assert_eq!(Dirty::Dirty.as_str(), "dirty");
+        assert_eq!(Dirty::Unknown.as_str(), "unknown");
+    }
+
+    #[test]
+    fn an_empty_reachable_set_is_empty() {
+        let set = ReachableSet::new(vec![]);
+        assert!(set.is_empty());
+        assert!(!set.contains(&sha("aaaa")));
+    }
+
+    #[test]
+    fn closed_status_falls_back_to_a_resolution_word() {
+        assert_eq!(
+            TicketStatus::Closed { resolution: None }.closed_resolution(),
+            Some("Resolved")
+        );
+        assert_eq!(
+            TicketStatus::Closed {
+                resolution: Some("Fixed".into())
+            }
+            .closed_resolution(),
+            Some("Fixed")
+        );
+        assert_eq!(TicketStatus::Open.closed_resolution(), None);
+        assert_eq!(TicketStatus::NotChecked.closed_resolution(), None);
+        assert!(!TicketStatus::Unknown {
+            detail: "timeout".into()
+        }
+        .is_known());
+        assert!(TicketStatus::Open.is_known());
+    }
+
+    #[test]
+    fn a_contested_ticket_answer_is_not_evidence() {
+        let mut wt = WorktreeSnapshot {
+            path: std::path::PathBuf::from("/repo/worktrees/PROJ-1"),
+            branch: Some(BranchName::parse("PROJ-1").unwrap()),
+            head: Some(sha("aaaa")),
+            kind: WorktreeKind::Linked,
+            dirty: Dirty::Clean,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        };
+        let closed = TicketObservation {
+            provider: ProviderId::parse("jira").unwrap(),
+            id: TicketId::parse("PROJ-1").unwrap(),
+            strength: Strength::Identity,
+            status: TicketStatus::Closed {
+                resolution: Some("Done".into()),
+            },
+            summary: None,
+        };
+        let unknown = TicketObservation {
+            status: TicketStatus::Unknown {
+                detail: "timeout".into(),
+            },
+            ..closed.clone()
+        };
+        let mention = TicketObservation {
+            strength: Strength::Mention,
+            ..closed.clone()
+        };
+
+        // A mention-only observation never justifies removal.
+        wt.tickets = vec![mention.clone()];
+        assert!(wt.closed_ticket_resolution().is_none());
+        assert!(wt.primary_ticket().is_none());
+
+        // A closed identity observation does.
+        wt.tickets = vec![closed.clone()];
+        assert_eq!(wt.closed_ticket_resolution(), Some("Done"));
+        assert!(wt.primary_known_ticket().is_some());
+
+        // Adding an unreadable identity observation makes the answer contested.
+        wt.tickets = vec![closed.clone(), unknown];
+        assert!(wt.closed_ticket_resolution().is_none());
+        assert_eq!(wt.primary_known_ticket().unwrap(), &closed);
+    }
+
+    #[test]
+    fn a_contested_change_answer_is_not_a_merge() {
+        let mut wt = WorktreeSnapshot {
+            path: std::path::PathBuf::from("/repo/worktrees/PROJ-1"),
+            branch: Some(BranchName::parse("PROJ-1").unwrap()),
+            head: Some(sha("aaaa")),
+            kind: WorktreeKind::Linked,
+            dirty: Dirty::Clean,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        };
+        let base = ChangeObservation {
+            provider: ProviderId::parse("github").unwrap(),
+            strength: Strength::Identity,
+            selector: "head_branch".into(),
+            branch: "PROJ-1".into(),
+            state: ChangeState::Merged { reference: None },
+        };
+
+        assert!(!wt.has_merged_change(), "no evidence is not a merge");
+
+        wt.changes = vec![base.clone()];
+        assert!(wt.has_merged_change());
+
+        wt.changes = vec![
+            base.clone(),
+            ChangeObservation {
+                state: ChangeState::Unknown {
+                    detail: "timeout".into(),
+                },
+                ..base.clone()
+            },
+        ];
+        assert!(
+            !wt.has_merged_change(),
+            "a contested answer is not evidence"
+        );
+
+        wt.changes = vec![ChangeObservation {
+            strength: Strength::Mention,
+            ..base
+        }];
+        assert!(
+            !wt.has_merged_change(),
+            "a mention cannot authorize removal"
+        );
+    }
+}

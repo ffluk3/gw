@@ -269,7 +269,12 @@ mod tests {
         }
     }
 
-    struct EnvGuard {
+    /// Share the same process-wide lock with the coverage tests.
+    pub(super) fn env_guard_for_root(root: &Path) -> EnvGuard {
+        env_guard(root)
+    }
+
+    pub(super) struct EnvGuard {
         _lock: std::sync::MutexGuard<'static, ()>,
         previous: Option<std::ffi::OsString>,
     }
@@ -281,5 +286,109 @@ mod tests {
                 None => std::env::remove_var(REPOS_ROOT_ENV),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    fn layout(dir: &Path, slug: &str) -> PathBuf {
+        let path = dir.join(slug);
+        std::fs::create_dir_all(path.join(".bare")).unwrap();
+        std::fs::write(path.join(".bare").join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        path
+    }
+
+    #[test]
+    fn an_empty_argument_is_a_usage_error() {
+        assert!(matches!(
+            resolve_repo_arg("   ", Path::new("/tmp")),
+            Err(Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn a_path_shaped_argument_that_is_missing_is_a_usage_error() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(matches!(
+            resolve_repo_arg("./nope", tmp.path()),
+            Err(Error::Usage(message)) if message.contains("not a directory")
+        ));
+        assert!(matches!(
+            resolve_repo_arg("/definitely/not/here", tmp.path()),
+            Err(Error::Usage(_))
+        ));
+    }
+
+    #[test]
+    fn an_owner_name_that_is_missing_lists_the_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        let err = resolve_repo_arg("acme/missing", Path::new("/tmp")).unwrap_err();
+        assert!(err.to_string().contains("no repository named"));
+    }
+
+    #[test]
+    fn an_unknown_name_lists_available_repositories() {
+        let tmp = tempfile::tempdir().unwrap();
+        layout(tmp.path(), "acme/widgets");
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        let err = resolve_repo_arg("nothing", Path::new("/tmp")).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("acme/widgets"), "{message}");
+    }
+
+    #[test]
+    fn more_than_twenty_layouts_are_summarized() {
+        let tmp = tempfile::tempdir().unwrap();
+        for i in 0..25 {
+            layout(tmp.path(), &format!("acme/repo{i:02}"));
+        }
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        let err = resolve_repo_arg("nothing", Path::new("/tmp")).unwrap_err();
+        assert!(err.to_string().contains("... and 5 more"), "{err}");
+    }
+
+    #[test]
+    fn an_ambiguous_name_suggests_the_owner_form() {
+        let tmp = tempfile::tempdir().unwrap();
+        layout(tmp.path(), "acme/widgets");
+        layout(tmp.path(), "other/widgets");
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        let err = resolve_repo_arg("widgets", Path::new("/tmp")).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("more than one"), "{message}");
+        assert!(message.contains("--repo owner/widgets"), "{message}");
+    }
+
+    #[test]
+    fn a_tilde_path_is_expanded() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        // `~/<name>` must be treated as a path, not a repository name.
+        let err = resolve_repo_arg("~/nope-not-here", Path::new("/tmp")).unwrap_err();
+        assert!(err.to_string().contains("not a directory"), "{err}");
+    }
+
+    #[test]
+    fn the_repos_root_env_wins_and_expands_a_tilde() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _guard = super::tests::env_guard_for_root(tmp.path());
+        assert_eq!(repos_root(), tmp.path());
+
+        std::env::set_var(REPOS_ROOT_ENV, "~/repos-test");
+        let home = std::env::var_os("HOME").unwrap();
+        assert_eq!(repos_root(), PathBuf::from(&home).join("repos-test"));
+
+        // A blank value falls back to the default.
+        std::env::set_var(REPOS_ROOT_ENV, "  ");
+        assert_eq!(repos_root(), PathBuf::from(&home).join("repos"));
+    }
+
+    #[test]
+    fn a_missing_root_discovers_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(discover(&tmp.path().join("absent")).is_empty());
     }
 }

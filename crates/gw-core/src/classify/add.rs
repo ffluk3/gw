@@ -78,3 +78,14 @@ mod tests {
         assert_eq!(add_strategy(None, false, false), AddStrategy::CreateNew);
     }
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+
+    #[test]
+    fn a_branch_without_a_backslash_is_usable() {
+        let branch = BranchName::parse("feature/x").unwrap();
+        assert!(validate_new_branch(&branch).is_ok());
+    }
+}

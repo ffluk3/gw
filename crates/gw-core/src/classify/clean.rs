@@ -120,3 +120,168 @@ pub fn branches_to_delete(plan: &Plan) -> Vec<(BranchName, crate::model::Sha)> {
         })
         .collect()
 }
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::*;
+    use crate::model::Sha;
+    use crate::snapshot::{Activity, BranchSnapshot, Dirty, ReachableSet, WorktreeSnapshot};
+    use std::collections::BTreeSet;
+
+    fn sha(raw: &str) -> Sha {
+        Sha::parse(raw).unwrap()
+    }
+
+    fn snapshot(orphans: Vec<BranchSnapshot>) -> RepoSnapshot {
+        RepoSnapshot {
+            layout: crate::layout::Layout::new(std::path::PathBuf::from("/repo")),
+            default_branch: Some(BranchName::parse("develop").unwrap()),
+            head_branch: None,
+            protected: BTreeSet::new(),
+            reachable: ReachableSet::new(vec![sha("aaaa")]),
+            worktrees: Vec::new(),
+            orphans,
+        }
+    }
+
+    fn orphan(name: &str, tip: Option<&str>, worktree: Option<&str>) -> BranchSnapshot {
+        BranchSnapshot {
+            name: BranchName::parse(name).unwrap(),
+            worktree: worktree.map(std::path::PathBuf::from),
+            tip: tip.map(sha),
+            commit_age_secs: Some(86_400 * 30),
+        }
+    }
+
+    fn deleting_policy() -> Policy {
+        Policy {
+            delete_branches: true,
+            ..Policy::default()
+        }
+    }
+
+    #[test]
+    fn orphans_are_ignored_without_the_opt_in() {
+        let snap = snapshot(vec![orphan("PROJ-1", Some("aaaa"), None)]);
+        let policy = Policy {
+            delete_branches: false,
+            ..Policy::default()
+        };
+        assert!(classify_clean(&snap, &policy).is_empty());
+    }
+
+    #[test]
+    fn a_checked_out_branch_is_not_an_orphan_candidate() {
+        let snap = snapshot(vec![orphan(
+            "PROJ-1",
+            Some("aaaa"),
+            Some("/repo/worktrees/PROJ-1"),
+        )]);
+        assert!(classify_clean(&snap, &deleting_policy()).is_empty());
+    }
+
+    #[test]
+    fn a_protected_branch_is_not_a_candidate() {
+        let mut snap = snapshot(vec![orphan("develop", Some("aaaa"), None)]);
+        snap.protected.insert(BranchName::parse("develop").unwrap());
+        assert!(classify_clean(&snap, &deleting_policy()).is_empty());
+    }
+
+    #[test]
+    fn an_orphan_without_a_tip_is_status_unknown() {
+        let snap = snapshot(vec![orphan("PROJ-1", None, None)]);
+        let plan = classify_clean(&snap, &deleting_policy());
+        assert!(matches!(
+            plan.entries[0].1,
+            Decision::Keep {
+                reason: Reason::StatusUnknown
+            }
+        ));
+    }
+
+    #[test]
+    fn an_orphan_with_unpublished_commits_is_kept() {
+        let snap = snapshot(vec![orphan("PROJ-1", Some("bbbb"), None)]);
+        let plan = classify_clean(&snap, &deleting_policy());
+        assert!(matches!(
+            plan.entries[0].1,
+            Decision::Keep {
+                reason: Reason::HasUnpublishedCommits
+            }
+        ));
+    }
+
+    #[test]
+    fn a_stale_published_orphan_is_deleted_with_its_tip() {
+        let snap = snapshot(vec![orphan("PROJ-1", Some("aaaa"), None)]);
+        let plan = classify_clean(&snap, &deleting_policy());
+        match &plan.entries[0].1 {
+            Decision::Delete { tip, reason } => {
+                assert_eq!(tip.as_str(), "aaaa");
+                assert!(matches!(reason, Reason::Stale { .. }));
+            }
+            other => panic!("expected Delete, got {other:?}"),
+        }
+        assert_eq!(
+            removable_worktree_paths(&plan),
+            Vec::<std::path::PathBuf>::new()
+        );
+        let deleted = branches_to_delete(&plan);
+        assert_eq!(deleted.len(), 1);
+        assert_eq!(deleted[0].1.as_str(), "aaaa");
+    }
+
+    #[test]
+    fn a_recent_published_orphan_is_kept() {
+        let mut branch = orphan("PROJ-1", Some("aaaa"), None);
+        branch.commit_age_secs = Some(60);
+        let snap = snapshot(vec![branch]);
+        let plan = classify_clean(&snap, &deleting_policy());
+        assert!(matches!(
+            plan.entries[0].1,
+            Decision::Keep {
+                reason: Reason::RecentlyActive { .. }
+            }
+        ));
+        assert!(branches_to_delete(&plan).is_empty());
+    }
+
+    #[test]
+    fn a_bare_worktree_is_never_a_candidate_and_removals_are_collected() {
+        let mut snap = snapshot(vec![]);
+        snap.worktrees.push(WorktreeSnapshot {
+            path: std::path::PathBuf::from("/repo/.bare"),
+            branch: Some(BranchName::parse("develop").unwrap()),
+            head: Some(sha("aaaa")),
+            kind: WorktreeKind::Main,
+            dirty: Dirty::Unknown,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: Vec::new(),
+        });
+        snap.worktrees.push(WorktreeSnapshot {
+            path: std::path::PathBuf::from("/repo/worktrees/PROJ-9"),
+            branch: Some(BranchName::parse("PROJ-9").unwrap()),
+            head: Some(sha("aaaa")),
+            kind: WorktreeKind::Linked,
+            dirty: Dirty::Clean,
+            activity: Activity::unknown(),
+            tickets: Vec::new(),
+            changes: vec![crate::snapshot::ChangeObservation {
+                provider: crate::convention::ProviderId::parse("github").unwrap(),
+                strength: crate::convention::Strength::Identity,
+                selector: "head_branch".into(),
+                branch: "PROJ-9".into(),
+                state: crate::snapshot::ChangeState::Merged { reference: None },
+            }],
+        });
+
+        let plan = classify_clean(&snap, &Policy::default());
+        assert_eq!(plan.entries.len(), 1, "the bare entry was planned");
+        assert_eq!(
+            removable_worktree_paths(&plan),
+            vec![std::path::PathBuf::from("/repo/worktrees/PROJ-9")]
+        );
+        assert!(branches_to_delete(&plan).is_empty());
+    }
+}

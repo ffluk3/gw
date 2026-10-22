@@ -338,7 +338,7 @@ fn change_state(row: &ResultRow) -> ChangeState {
 mod tests {
     use super::*;
 
-    fn empty_row() -> ResultRow {
+    pub(super) fn empty_row() -> ResultRow {
         ResultRow {
             id: None,
             branch: None,
@@ -391,5 +391,253 @@ mod tests {
     #[test]
     fn malformed_output_is_an_error() {
         assert!(CommandProvider::results("not json").is_err());
+    }
+}
+
+#[cfg(test)]
+mod coverage_tests {
+    use super::tests::empty_row;
+    use super::*;
+    use crate::commands::snapshot::RepoRef;
+
+    fn provider(capability: Capability) -> CommandProvider {
+        CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec!["/bin/cat".into()],
+            capability,
+        )
+    }
+
+    fn repo() -> RepoRef {
+        RepoRef {
+            remote: Some("git@github.com:acme/widgets.git".into()),
+            slug: Some("acme/widgets".into()),
+        }
+    }
+
+    fn ticket_id(raw: &str) -> TicketId {
+        TicketId::parse(raw).unwrap()
+    }
+
+    fn change_query(branch: &str, selector: ChangeSelector) -> ChangeQuery {
+        ChangeQuery {
+            provider: ProviderId::parse("host").unwrap(),
+            selector,
+            strength: Strength::Identity,
+            branch: branch.to_string(),
+            ticket: Some(ticket_id("PROJ-1")),
+        }
+    }
+
+    #[test]
+    fn capability_names_are_stable() {
+        assert_eq!(Capability::Ticket.as_str(), "ticket");
+        assert_eq!(Capability::Change.as_str(), "change");
+        assert_eq!(provider(Capability::Ticket).service(), "ticket-command");
+        assert_eq!(provider(Capability::Change).service(), "change-command");
+    }
+
+    #[test]
+    fn an_empty_command_is_an_error() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec![],
+            Capability::Ticket,
+        );
+        let error = provider.run(&serde_json::json!({})).unwrap_err();
+        assert!(error.to_string().contains("empty"), "{error}");
+    }
+
+    #[test]
+    fn a_broken_protocol_is_one_unknown_per_ticket() {
+        // `/bin/cat` echoes the request, which is not protocol 1, so every
+        // identifier in the batch gets an unknown observation.
+        let ids = vec![ticket_id("PROJ-1"), ticket_id("PROJ-2")];
+        let observations =
+            TicketProvider::lookup(&provider(Capability::Ticket), &ids, Limits::default()).unwrap();
+        assert_eq!(observations.len(), 2);
+        for observation in &observations {
+            match &observation.status {
+                TicketStatus::Unknown { .. } => {}
+
+                other => panic!("expected Unknown, got {other:?}"),
+            }
+            assert!(observation.summary.is_none());
+        }
+    }
+
+    #[test]
+    fn a_missing_program_is_an_error() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec!["/definitely/not-a-real-binary".into()],
+            Capability::Ticket,
+        );
+        let error = provider.run(&serde_json::json!({})).unwrap_err();
+        assert!(error.to_string().contains("could not run"), "{error}");
+    }
+
+    #[test]
+    fn a_failing_program_is_an_error() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "echo boom >&2; exit 4".into(),
+            ],
+            Capability::Change,
+        );
+        let error = provider.run(&serde_json::json!({})).unwrap_err();
+        assert!(error.to_string().contains("boom"), "{error}");
+    }
+
+    #[test]
+    fn a_successful_program_returns_its_stdout() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec!["/bin/cat".into()],
+            Capability::Ticket,
+        );
+        let request = serde_json::json!({"hello": "world"});
+        assert!(provider.run(&request).unwrap().contains("hello"));
+    }
+
+    #[test]
+    fn the_request_names_the_protocol_capability_and_repo() {
+        let request = provider(Capability::Ticket).request(&repo(), serde_json::json!([]));
+        assert_eq!(request["protocol"], 1);
+        assert_eq!(request["capability"], "ticket");
+        assert_eq!(request["repo"]["slug"], "acme/widgets");
+        assert_eq!(request["repo"]["remote"], "git@github.com:acme/widgets.git");
+    }
+
+    #[test]
+    fn ticket_rows_cover_every_state() {
+        for (state, expected) in [
+            ("open", TicketStatus::Open),
+            ("closed", TicketStatus::Closed { resolution: None }),
+        ] {
+            let row = ResultRow {
+                state: Some(state.into()),
+                ..empty_row()
+            };
+            assert_eq!(ticket_status(&row), expected);
+        }
+        let missing = ResultRow {
+            state: None,
+            ..empty_row()
+        };
+        assert!(matches!(
+            ticket_status(&missing),
+            TicketStatus::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn change_rows_cover_every_state() {
+        let row = ResultRow {
+            state: Some("merged".into()),
+            reference: Some("#7".into()),
+            ..empty_row()
+        };
+        assert_eq!(
+            change_state(&row),
+            ChangeState::Merged {
+                reference: Some("#7".into())
+            }
+        );
+        let open = ResultRow {
+            state: Some("open".into()),
+            ..empty_row()
+        };
+        assert_eq!(change_state(&open), ChangeState::Open { reference: None });
+        let missing = ResultRow {
+            state: None,
+            ..empty_row()
+        };
+        assert!(matches!(
+            change_state(&missing),
+            ChangeState::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn a_missing_results_array_is_an_empty_batch() {
+        assert!(CommandProvider::results(r#"{"protocol":1}"#)
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn looking_up_tickets_without_a_result_is_unknown() {
+        // `/bin/cat` echoes the request; that is not a protocol-1 response, so
+        // every identifier becomes unknown.
+        let observations = TicketProvider::lookup(
+            &provider(Capability::Ticket),
+            &[ticket_id("PROJ-1")],
+            Limits::default(),
+        )
+        .unwrap();
+        assert_eq!(observations.len(), 1);
+        assert!(matches!(
+            observations[0].status,
+            TicketStatus::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn looking_up_changes_matches_each_selector_key() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec!["/bin/echo".into(), r#"{"protocol":1,"results":[]}"#.into()],
+            Capability::Change,
+        );
+        for selector in [
+            ChangeSelector::HeadBranch,
+            ChangeSelector::ContainsCommit,
+            ChangeSelector::MentionTicket,
+        ] {
+            let observations = ChangeProvider::lookup(
+                &provider,
+                &repo(),
+                &[change_query("PROJ-1", selector)],
+                Limits::default(),
+            )
+            .unwrap();
+            assert_eq!(observations.len(), 1);
+            assert!(matches!(observations[0].state, ChangeState::Unknown { .. }));
+        }
+    }
+
+    #[test]
+    fn an_empty_batch_never_runs_the_command() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec!["/definitely/not-a-real-binary".into()],
+            Capability::Ticket,
+        );
+        assert!(TicketProvider::lookup(&provider, &[], Limits::default())
+            .unwrap()
+            .is_empty());
+        assert!(
+            ChangeProvider::lookup(&provider, &repo(), &[], Limits::default())
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn a_batch_larger_than_the_limit_is_chunked() {
+        let ids: Vec<TicketId> = (0..5).map(|i| ticket_id(&format!("PROJ-{i}"))).collect();
+        // `/bin/cat` echoes the request, so each chunk fails protocol parsing
+        // and yields unknown; what matters is every id still gets an answer.
+        let observations = TicketProvider::lookup(
+            &provider(Capability::Ticket),
+            &ids,
+            Limits { max_queries: 2 },
+        )
+        .unwrap();
+        assert_eq!(observations.len(), 5);
     }
 }
