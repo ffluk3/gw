@@ -129,14 +129,8 @@ lists the project keys that the `.gw.toml` of that layout declares.
 
 ## Shell integration
 
-`gw.sh` defines:
-
-| Function | Behavior |
-| --- | --- |
-| `gw` | Runs `gw`. For `gw add --cd` (or `GW_CD=1`), it changes into the worktree afterwards. |
-| `gwadd <branch>` | `gw add --cd <branch>`: make or reuse the worktree, then change into it. |
-| `gwstatus` | `gw status "$@"` |
-| `gwclean` | `gw clean "$@"` |
+`gw.sh` defines one function, `gw`. It runs `gw`. For `gw add --cd` (or
+`GW_CD=1`), it changes into the worktree afterwards.
 
 Source the file from your shell profile. The script returns early if `gw` is
 not on `PATH`.
@@ -144,8 +138,7 @@ not on `PATH`.
 The `gw` function shadows the binary so that it can change directory in your
 shell. It passes each argument through unchanged. It changes directory only for
 `add`, and only when you give `--cd` or set `GW_CD=1`. `--no-cd` turns off this
-behavior for one call. `gwclean` and `gwstatus` always call the binary
-directly.
+behavior for one call.
 
 The installer copies the file to
 `${XDG_DATA_HOME:-~/.local/share}/gw/gw.sh`. A source install also keeps the

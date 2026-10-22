@@ -5,9 +5,9 @@ use crate::snapshot::{ActivitySource, Dirty, RepoSnapshot, WorktreeKind, Worktre
 
 /// The first applicable fact about a worktree, in precedence order.
 ///
-/// This enum is the policy. The shell implementation expressed the same rule as
-/// an ordered `if`/`elif` ladder spread across two passes of `gwclean.sh`; here
-/// the ordering is explicit and `decide` is exhaustive over it, so adding a new
+/// This enum is the policy. The earlier shell implementation expressed the same
+/// rule as an ordered `if`/`elif` ladder spread across two passes; here the
+/// ordering is explicit and `decide` is exhaustive over it, so adding a new
 /// case is a compile error until its consequence is written down.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Verdict<'a> {

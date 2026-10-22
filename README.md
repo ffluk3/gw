@@ -39,7 +39,7 @@ cd gw
 ```
 
 Each method writes `gw` to `~/.local/bin`. Then add the shell integration,
-which provides `gwadd` and makes `gw add --cd` change into the new worktree:
+which makes `gw add --cd` change into the new worktree:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
@@ -62,7 +62,7 @@ gw init git@github.com:acme/widgets.git --dir ~/repos/acme/widgets
 
 # open a worktree and enter it
 cd ~/repos/acme/widgets/worktrees/main
-gwadd PROJ-1234
+gw add --cd PROJ-1234
 
 # see each worktree
 gw status

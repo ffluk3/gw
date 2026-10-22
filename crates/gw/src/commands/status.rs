@@ -18,7 +18,7 @@ pub fn run(ctx: &Context, _args: StatusArgs) -> Result<Outcome, Error> {
     // Ticket summaries are best-effort: a failure degrades the table, it does
     // not fail the command. Use `--skip-provider` to avoid the lookup entirely.
     let refs = snapshot::ticket_refs(&snap, &ctx.convention);
-    let observations = snapshot::observe_tickets(&ctx.registry(), &refs, Limits::default());
+    let observations = snapshot::observe_tickets(ctx.registry(), &refs, Limits::default());
     snapshot::attach_tickets(&mut snap, &ctx.convention, &observations);
 
     if ctx.is_json() {

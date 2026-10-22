@@ -17,9 +17,9 @@ pub enum AddStrategy {
 
 /// Decide how to materialize a worktree.
 ///
-/// Replaces the four-arm ladder in `gwadd.sh`, and unlike the shell version
-/// there is no `|| true` swallowing a failed fast-forward: the strategy is a
-/// decision, and the adapter reports failure to apply it.
+/// Replaces the four-arm ladder of the earlier shell implementation, and unlike
+/// that version there is no `|| true` swallowing a failed fast-forward: the
+/// strategy is a decision, and the adapter reports failure to apply it.
 #[must_use]
 pub fn add_strategy(existing: Option<PathBuf>, has_local: bool, has_remote: bool) -> AddStrategy {
     if let Some(path) = existing {

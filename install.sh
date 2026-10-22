@@ -200,7 +200,7 @@ case ":$PATH:" in
 esac
 
 echo
-echo "Add the shell integration (for 'gwadd', 'gwstatus', 'gwclean'):"
+echo "Add the shell integration (for 'gw add --cd'):"
 if [[ -f "$SHARE/gw.sh" ]]; then
   echo "  echo 'source $SHARE/gw.sh' >> ~/.zshrc"
 elif [[ -n $script_dir ]]; then

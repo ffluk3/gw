@@ -5,22 +5,13 @@ Use this guide to get a checkout for a branch.
 ## Open a worktree and enter it
 
 ```bash
-gwadd PROJ-1234
-```
-
-`gwadd` comes from the shell integration. It runs `gw add --cd`, and then the
-`gw` shell function changes into the result. A child process cannot change the
-directory of its parent, which is why the wrapper exists.
-
-This is the same call without the `gwadd` shorthand:
-
-```bash
 gw add --cd PROJ-1234
 ```
 
-`--cd` works only when the shell integration is sourced. Without it, the binary
-prints the path and your shell stays where it is, because no process can change
-the directory of its parent.
+`--cd` works only when the shell integration is sourced. The `gw` shell
+function from that file changes into the result. Without it, the binary prints
+the path and your shell stays where it is, because no process can change the
+directory of its parent.
 
 To make each `gw add` change directory, set the default one time:
 

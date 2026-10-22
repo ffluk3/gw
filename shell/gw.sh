@@ -57,18 +57,3 @@ gw() {
 
   command gw "$@"
 }
-
-# `gwadd` keeps the old muscle memory: create or reuse the worktree, then cd.
-gwadd() {
-  if [[ $# -eq 0 ]]; then
-    echo "usage: gwadd <branch>" >&2
-    return 1
-  fi
-  # GW_CD makes the `gw` function navigate without forwarding --cd, so any
-  # other arguments (--no-fetch, --repo) pass through unchanged.
-  GW_CD=1 gw add "$@"
-}
-
-# Shorthands matching the previous sourced functions.
-gwclean() { command gw clean "$@"; }
-gwstatus() { command gw status "$@"; }

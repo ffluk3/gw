@@ -1,6 +1,6 @@
 ---
 name: gw
-description: Manage git worktrees in a bare-repo layout with the `gw` CLI. Use to give each task or agent its own checkout, to inspect worktree status as JSON, and to safely remove merged or stale worktrees. Activate when a repository has `.bare/` plus `worktrees/`, when switching branches would disturb another agent's work, when asked to clean up worktrees or branches, or when the user mentions gw, gwadd, gwstatus, or gwclean.
+description: Manage git worktrees in a bare-repo layout with the `gw` CLI. Use to give each task or agent its own checkout, to inspect worktree status as JSON, and to safely remove merged or stale worktrees. Activate when a repository has `.bare/` plus `worktrees/`, when switching branches would disturb another agent's work, when asked to clean up worktrees or branches, or when the user mentions gw.
 license: MIT
 compatibility: Requires git and the `gw` CLI on PATH. Optional gh enables merged-PR detection in `gw clean`; optional curl plus JIRA credentials enable ticket summaries.
 metadata:
@@ -55,7 +55,7 @@ worktree="$(gw add --print-path PROJ-1234)"
 
 Use the returned path in `git -C "$worktree" ...` or as an absolute path in
 later commands. Do not assume a `cd` persists between tool calls. Do not use
-`gwadd`; it is an interactive shell function that changes the caller's
+`--cd`; it relies on an interactive shell function that changes the caller's
 directory, which a non-interactive tool call cannot rely on.
 
 `gw add` selects the branch source in this order: an existing worktree, a

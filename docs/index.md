@@ -23,7 +23,8 @@ Install the latest release. You need `curl` and `tar`, not a Rust toolchain:
 curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh | bash
 ```
 
-Then load the shell integration. It gives you `gwadd` and `gw add --cd`:
+Then load the shell integration. It makes `gw add --cd` change into the new
+worktree:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
@@ -39,7 +40,7 @@ gw init git@github.com:acme/widgets.git --dir ~/repos/acme/widgets
 cd ~/repos/acme/widgets/worktrees/main
 
 # open a worktree for a ticket and change into it
-gwadd PROJ-1234
+gw add --cd PROJ-1234
 
 # see every worktree in one table
 gw status
@@ -49,7 +50,7 @@ gw clean --dry-run
 gw clean --yes
 ```
 
-`gwadd` creates the branch from the current `HEAD` when the branch does not
+`gw add` creates the branch from the current `HEAD` when the branch does not
 exist. Run the command again for the same branch, and `gw` reuses the existing
 worktree. It does not make a second one.
 
