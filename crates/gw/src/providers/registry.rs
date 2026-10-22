@@ -46,7 +46,7 @@ impl Registry {
     /// one command can back tickets, changes, or both.
     fn add_commands(&mut self, loaded: &crate::convention_file::Loaded) {
         for config in &loaded.providers {
-            if config.kind != "command" {
+            if config.kind() != "command" {
                 continue;
             }
             if self.skipped.contains(&config.id) {
@@ -203,7 +203,7 @@ mod coverage_tests {
     fn command_provider(id: &str, command: Option<Vec<String>>) -> ProviderConfig {
         ProviderConfig {
             id: ProviderId::parse(id).unwrap(),
-            kind: "command".into(),
+            kind: Some("command".into()),
             base_url: None,
             done_status_category: None,
             command,
@@ -257,7 +257,7 @@ mod coverage_tests {
     #[test]
     fn a_non_command_kind_is_not_added_as_a_command_provider() {
         let mut config = command_provider("host", Some(vec!["tool".into()]));
-        config.kind = "jira".into();
+        config.kind = Some("jira".into());
         let loaded = loaded_with(config, "host");
         let registry = Registry::build(&loaded, Vec::new());
         let id = ProviderId::parse("host").unwrap();
@@ -281,7 +281,7 @@ mod coverage_tests {
         let loaded = Loaded {
             providers: vec![ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: Some("https://example.atlassian.net".into()),
                 done_status_category: None,
                 command: None,

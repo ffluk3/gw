@@ -1,3 +1,17 @@
+/// A decorative glyph, or nothing when emoji are disabled.
+///
+/// Only human prose uses this. Table markers and JSON are content, not
+/// decoration, and never pass through here. The caller includes any trailing
+/// space in `glyph`, so plain output has no gap left behind.
+#[must_use]
+pub fn decor(emoji_enabled: bool, glyph: &'static str) -> &'static str {
+    if emoji_enabled {
+        glyph
+    } else {
+        ""
+    }
+}
+
 /// Render rows as aligned, left-justified columns.
 ///
 /// Widths are measured with `display_width`, so a wide glyph in one cell does
@@ -49,6 +63,12 @@ impl Outcome {
 #[cfg(test)]
 mod coverage_tests {
     use super::*;
+
+    #[test]
+    fn decoration_is_removed_when_emoji_are_disabled() {
+        assert_eq!(decor(true, "🔍 "), "🔍 ");
+        assert_eq!(decor(false, "🔍 "), "");
+    }
 
     #[test]
     fn columns_are_padded_to_the_widest_cell() {

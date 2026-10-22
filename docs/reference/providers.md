@@ -11,9 +11,10 @@ show` says why it is inactive.
 
 ### `jira` — tickets
 
-Reads a base URL from `[convention.providers.jira] base_url`, or from
-`GW_JIRA_BASE_URL` when the file does not set one. Credentials come from
-`GW_JIRA_USER` and `GW_JIRA_API_TOKEN` only.
+Reads a base URL from `GW_JIRA_BASE_URL` when it is set and non-empty,
+otherwise from `[convention.providers.jira] base_url` in any configuration
+file. A `jira` provider entry must exist for the environment to activate the
+provider. Credentials come from `GW_JIRA_USER` and `GW_JIRA_API_TOKEN` only.
 
 | Setting | Meaning | Default |
 | --- | --- | --- |

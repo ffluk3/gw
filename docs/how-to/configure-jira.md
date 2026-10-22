@@ -13,8 +13,9 @@ root to scope it to one repository:
 base_url = "https://acme.atlassian.net"
 ```
 
-`GW_JIRA_BASE_URL` works too, when the file does not set one. The base URL must
-use `https://`; `gw` rejects plain HTTP.
+`GW_JIRA_BASE_URL` works too, and it wins when the file also sets a base URL.
+A `[convention.providers.jira]` entry must exist in a file for the variable to
+activate JIRA. The base URL must use `https://`; `gw` rejects plain HTTP.
 
 ## Set credentials
 

@@ -19,12 +19,15 @@ use crate::context::Context;
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Read before the command is moved out of `cli`; `init` runs without a
+    // `Context`, so it needs the resolved value here.
+    let color_disabled = cli.color_disabled();
 
     // `init` creates a layout and `repos` lists them, so neither can require
     // one to exist first.
     if matches!(&cli.command, Command::Init(_) | Command::Repos(_)) {
         let result = match cli.command {
-            Command::Init(args) => commands::init::run(args, cli.json),
+            Command::Init(args) => commands::init::run(args, cli.json, color_disabled),
             Command::Repos(args) => commands::repos::run(&args, cli.json),
             _ => unreachable!("guarded above"),
         };

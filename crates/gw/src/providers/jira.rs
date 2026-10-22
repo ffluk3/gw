@@ -25,20 +25,23 @@ impl JiraRest {
     /// not configured. Callers treat absence as "provider inactive", never an
     /// error.
     ///
-    /// The base URL comes from `[convention.providers.jira] base_url`, in
-    /// either configuration file, or from `GW_JIRA_BASE_URL` when the file
-    /// does not set one. Credentials come from the environment only, so they
+    /// The base URL comes from `GW_JIRA_BASE_URL` first, then from
+    /// `[convention.providers.jira] base_url` in whichever configuration file
+    /// supplies it. The environment is a per-invocation override, so it sits
+    /// above every file. Credentials come from the environment only, so they
     /// are never written to a file that might be committed.
     pub fn from_config(loaded: &crate::convention_file::Loaded) -> Option<Self> {
         let provider = loaded.providers.iter().find(|p| p.id.as_str() == "jira");
-        // A `jira` entry must exist for the environment fallback to apply.
+        // A `jira` entry must exist before the environment is consulted.
         // Otherwise an unrelated `GW_JIRA_BASE_URL` in someone's profile would
         // switch on a provider this layout deliberately left out.
         provider?;
-        let base_url = provider
-            .and_then(|p| p.base_url.clone())
-            .or_else(|| std::env::var("GW_JIRA_BASE_URL").ok())
-            .filter(|value| !value.trim().is_empty())?;
+        let base_url = std::env::var("GW_JIRA_BASE_URL")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+            .or_else(|| provider.and_then(|p| p.base_url.clone()))
+            .filter(|value| !value.is_empty())?;
         let user = std::env::var("GW_JIRA_USER").ok()?;
         let token = std::env::var("GW_JIRA_API_TOKEN").ok()?;
         if base_url.trim().is_empty() || user.trim().is_empty() || token.trim().is_empty() {
@@ -359,7 +362,7 @@ mod tests {
         let missing_url = crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: None,
                 done_status_category: None,
                 command: None,
@@ -372,7 +375,7 @@ mod tests {
         let configured = crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: Some("https://example.atlassian.net/".into()),
                 done_status_category: None,
                 command: None,
@@ -386,7 +389,7 @@ mod tests {
         crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: base_url.map(str::to_string),
                 done_status_category: None,
                 command: None,
@@ -412,9 +415,25 @@ mod tests {
     }
 
     #[test]
-    fn the_file_wins_over_the_environment_base_url() {
+    fn the_environment_wins_over_the_file_base_url() {
         let _lock = crate::providers::test_support::credential_lock();
         std::env::set_var("GW_JIRA_BASE_URL", "https://from-env.atlassian.net");
+        std::env::set_var("GW_JIRA_USER", "me@example.com");
+        std::env::set_var("GW_JIRA_API_TOKEN", "token");
+
+        let loaded = jira_loaded(Some("https://from-file.atlassian.net"));
+        let adapter = JiraRest::from_config(&loaded).expect("configured");
+        assert_eq!(adapter.base_url, "https://from-env.atlassian.net");
+
+        std::env::remove_var("GW_JIRA_BASE_URL");
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+    }
+
+    #[test]
+    fn an_empty_environment_base_url_falls_back_to_the_file() {
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::set_var("GW_JIRA_BASE_URL", "   ");
         std::env::set_var("GW_JIRA_USER", "me@example.com");
         std::env::set_var("GW_JIRA_API_TOKEN", "token");
 

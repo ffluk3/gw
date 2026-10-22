@@ -4,8 +4,9 @@
 
 ```text
 <root>/
-  .bare/               the bare repository
-  worktrees/<branch>/  one checkout per branch
+  .bare/                        the bare repository
+  worktrees/<branch>/           one checkout per branch
+  worktrees/<branch>/.gw.toml   optional per-checkout settings
 ```
 
 A slash in a branch name becomes a directory level. `feature/x` lives at

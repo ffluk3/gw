@@ -98,26 +98,28 @@ fn protected_set(
             protected.insert(branch.clone());
         }
     }
-    // `[clean] protect` from the files, then `GW_PROTECT`. Both are additive:
-    // protection only ever grows, so a name that one source already listed is
-    // still protected and no source can remove another's protection.
-    for extra in ctx
-        .loaded
-        .clean
-        .protect
-        .iter()
-        .map(String::as_str)
-        .chain(
-            std::env::var("GW_PROTECT")
-                .unwrap_or_default()
-                .split(',')
-                .map(str::trim),
-        )
-        .filter(|s| !s.is_empty())
-    {
-        if let Ok(name) = BranchName::parse(extra) {
+    // `[clean] protect` from the files, then `GW_PROTECT`. This is the one
+    // deliberate exception to the precedence chain: every other setting
+    // selects behavior, but protection is a monotone safety set. Replacing it
+    // from a transient environment value could only remove protection, which
+    // is the destructive direction the fail-closed rule forbids. So the files
+    // replace each other, and `GW_PROTECT` supplements whatever they resolved.
+    // The file entries were validated at load time.
+    for raw in &ctx.loaded.clean.protect {
+        if let Ok(name) = BranchName::parse(raw.trim()) {
             protected.insert(name);
         }
+    }
+    for raw in std::env::var("GW_PROTECT").unwrap_or_default().split(',') {
+        let raw = raw.trim();
+        if raw.is_empty() {
+            continue;
+        }
+        // An invalid name used to be dropped silently, losing a protection
+        // without telling anyone. Refuse it instead.
+        let name = BranchName::parse(raw)
+            .map_err(|e| Error::Usage(format!("invalid GW_PROTECT branch '{raw}': {e}")))?;
+        protected.insert(name);
     }
     Ok(protected)
 }
@@ -606,7 +608,7 @@ mod coverage_tests {
             },
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("host").unwrap(),
-                kind: "command".into(),
+                kind: Some("command".into()),
                 base_url: None,
                 done_status_category: None,
                 command: Some(vec!["/definitely/not-a-real-binary".into()]),
@@ -649,6 +651,36 @@ mod coverage_tests {
             .slug
             .is_none());
         let _ = nothing();
+    }
+
+    #[test]
+    fn gw_protect_supplements_the_files_and_rejects_an_invalid_name() {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let _lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let previous = std::env::var_os("GW_PROTECT");
+
+        let loaded = crate::convention_file::Loaded {
+            clean: crate::convention_file::CleanSettings {
+                protect: vec!["release".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let ctx = Context::for_test(Layout::new(std::path::PathBuf::from("/repo")), loaded);
+
+        std::env::set_var("GW_PROTECT", "hotfix, release");
+        let protected = protected_set(&ctx, &[]).unwrap();
+        assert!(protected.contains(&BranchName::parse("release").unwrap()));
+        assert!(protected.contains(&BranchName::parse("hotfix").unwrap()));
+
+        std::env::set_var("GW_PROTECT", "not a branch");
+        let error = protected_set(&ctx, &[]).unwrap_err();
+        assert!(error.to_string().contains("GW_PROTECT"), "{error}");
+
+        match previous {
+            Some(value) => std::env::set_var("GW_PROTECT", value),
+            None => std::env::remove_var("GW_PROTECT"),
+        }
     }
 
     #[test]

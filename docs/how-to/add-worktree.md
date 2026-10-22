@@ -11,7 +11,8 @@ gw add PROJ-1234
 With the shell integration sourced, `gw add` changes into the new worktree.
 The `gw` shell function from that file performs the `cd`. Without the
 integration, the binary prints the path and your shell stays where it is,
-because no process can change the directory of its parent.
+because no process can change the directory of its parent. A standalone
+`gw add --cd` also prints a warning on stderr that names the integration.
 
 `--cd` says the same thing. It is useful only to override `GW_CD=0`.
 

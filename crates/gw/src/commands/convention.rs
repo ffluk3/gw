@@ -13,14 +13,14 @@ use crate::providers::Registry;
 /// `gw convention show` and `gw convention explain`.
 pub fn run(ctx: &Context, args: ConventionAction) -> Result<Outcome, Error> {
     match args {
-        ConventionAction::Show { json } => show(ctx, json),
-        ConventionAction::Explain { branch, json } => explain(ctx, &branch, json),
+        ConventionAction::Show => show(ctx),
+        ConventionAction::Explain { branch } => explain(ctx, &branch),
     }
 }
 
-fn show(ctx: &Context, json: bool) -> Result<Outcome, Error> {
+fn show(ctx: &Context) -> Result<Outcome, Error> {
     let view = View::new(ctx);
-    if json {
+    if ctx.is_json() {
         println!(
             "{}",
             serde_json::to_string_pretty(&view).unwrap_or_else(|_| "{}".into())
@@ -88,11 +88,11 @@ fn show(ctx: &Context, json: bool) -> Result<Outcome, Error> {
     Ok(Outcome::ok())
 }
 
-fn explain(ctx: &Context, branch: &str, json: bool) -> Result<Outcome, Error> {
+fn explain(ctx: &Context, branch: &str) -> Result<Outcome, Error> {
     let resolution = ctx.convention.resolve(branch);
     let lines = explain_lines(ctx.registry(), &ctx.convention, branch);
 
-    if json {
+    if ctx.is_json() {
         let document = serde_json::json!({
             "branch": branch,
             "tickets": resolution.tickets,
@@ -475,7 +475,7 @@ mod coverage_tests {
     fn command_provider(kind: &str) -> ProviderConfig {
         ProviderConfig {
             id: ProviderId::parse("host").unwrap(),
-            kind: kind.into(),
+            kind: Some(kind.into()),
             base_url: None,
             done_status_category: None,
             command: Some(vec!["tool".into()]),
@@ -515,7 +515,7 @@ mod coverage_tests {
         ] {
             for sources in [vec![], vec![PathBuf::from("/home/me/.gw.toml")]] {
                 let ctx = ctx(convention.clone(), vec![], sources);
-                show(&ctx, false).unwrap();
+                show(&ctx).unwrap();
             }
         }
     }
@@ -524,7 +524,7 @@ mod coverage_tests {
     fn explain_renders_matches_misses_and_queries() {
         let ctx = ctx(Convention::built_in(), vec![], vec![]);
         for branch in ["feature/PROJ-1-x", "no-ticket-here"] {
-            explain(&ctx, branch, false).unwrap();
+            explain(&ctx, branch).unwrap();
         }
     }
 
