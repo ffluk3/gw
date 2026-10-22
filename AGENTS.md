@@ -99,7 +99,10 @@ The full PR gate adds:
 
 CI (`ci.yml`) runs fmt, clippy, tests on Linux and macOS, the coverage gate,
 and `shellcheck` on `install.sh` and `shell/gw.sh` on Linux. Keep shell changes
-shellcheck-clean.
+shellcheck-clean. `scripts/test-shell-integration.sh` then exercises the
+wrapper in **both bash and zsh**; run it after any change to `shell/gw.sh`.
+zsh makes `path` an array tied to `PATH`, so a `local path` in the wrapper
+silently empties the search path and the binary it runs becomes unfindable.
 
 ### Coverage
 

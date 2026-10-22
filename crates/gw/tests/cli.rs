@@ -904,8 +904,9 @@ fn add_cd_prints_only_the_path() {
     assert!(out.stdout.trim().ends_with("worktrees/PROJ-24"));
 }
 
-/// `--no-cd` opts out of a `GW_CD=1` default or a shell alias, and the last
-/// of the pair wins when both are given.
+/// `--no-cd` opts out of the shell integration's default, and the last of the
+/// pair wins when both are given. The binary itself never changes directory;
+/// it only decides whether stdout is the bare path.
 #[test]
 fn add_no_cd_restores_normal_output() {
     let fx = Fixture::new();

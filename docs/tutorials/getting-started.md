@@ -53,8 +53,8 @@ prints a warning.
     ./install.sh --from-source
     ```
 
-Then add the shell integration. It makes `gw add --cd` open a worktree and
-change into it:
+Then add the shell integration. It makes `gw add` open a worktree and change
+into it:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
@@ -101,16 +101,16 @@ directory and found the layout. The table has one row for each worktree.
 ## Open a worktree for a branch
 
 ```bash
-gw add --cd PROJ-1234
+gw add PROJ-1234
 ```
 
-`--cd` makes the worktree and changes your directory into it. If the branch
-does not exist, `gw` makes it from the current `HEAD`.
+The shell integration makes the worktree and changes your directory into it.
+If the branch does not exist, `gw` makes it from the current `HEAD`.
 
 Run the same command again:
 
 ```bash
-gw add --cd PROJ-1234
+gw add PROJ-1234
 ```
 
 This time, `gw` reuses the existing worktree. It does not make a second one.

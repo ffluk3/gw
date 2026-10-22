@@ -56,9 +56,9 @@ The skill tells the agent to do these steps:
 - Make sure that the directory is inside a layout with `gw status --json`. Do
   not treat a normal clone as a layout.
 - Get a checkout with `gw add --print-path <branch>` and use the absolute path
-  that it returns. Do not use `--cd`. A `cd` in a child process does not
-  survive, and a non-interactive tool call cannot use the shell function that
-  performs the `cd`.
+  that it returns. A `cd` in a child process does not survive, and a
+  non-interactive tool call cannot use the shell function that performs the
+  `cd`, so rely on `--print-path` rather than on navigation.
 - Read state from `gw status --json` and `gw repos --json`, never from tables.
 - Preview with `gw clean --dry-run --json`. Apply `--yes` only with human
   approval. A piped `gw clean` is a dry run by default, so an unattended agent
