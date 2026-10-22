@@ -102,6 +102,7 @@ previous meaning and describe the primary (identity-strength) observation.
       "worktrees": 4,
       "dirty": null,
       "last_commit_age_secs": 7200,
+      "ticket_providers": ["jira"],
       "jira_projects": ["PROJ"]
     }
   ]
@@ -115,7 +116,8 @@ previous meaning and describe the primary (identity-strength) observation.
 | `worktrees` | number | Linked worktrees, not including harness worktrees. |
 | `dirty` | number or null | `null` unless `--dirty`. |
 | `last_commit_age_secs` | number or null | The newest commit across the worktrees. |
-| `jira_projects` | array | Declared in the `.gw.toml` of that layout. |
+| `ticket_providers` | array | Ticket providers named by that layout's own rules. |
+| `jira_projects` | array | Project filters that layout's ticket rules declare. Empty for a provider that has no project concept. |
 
 ## `gw add --json`
 

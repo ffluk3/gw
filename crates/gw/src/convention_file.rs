@@ -96,6 +96,24 @@ pub struct Loaded {
     pub jira_base_url: Option<String>,
 }
 
+/// Load one file, with no global layer and no inheritance.
+///
+/// Used by `gw repos`, which reports what each layout declares rather than
+/// what would apply to it.
+pub fn load_layout_only(layout_root: &Path) -> Result<Loaded, Error> {
+    let mut loaded = Loaded {
+        convention: Convention::built_in(),
+        ..Loaded::default()
+    };
+    let path = layout_root.join(LAYOUT_FILE);
+    if let Some(file) = File::load(&path)? {
+        loaded.sources.push(path);
+        apply(&mut loaded, file, Origin::Layout)?;
+    }
+    loaded.jira_project = normalize(loaded.jira_project);
+    Ok(loaded)
+}
+
 /// Load and merge the global and layout files.
 ///
 /// Precedence, highest first: the layout file, the global file (or `GW_CONFIG`),

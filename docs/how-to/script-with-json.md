@@ -56,6 +56,7 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
       "worktrees": 4,
       "dirty": null,
       "last_commit_age_secs": 7200,
+      "ticket_providers": ["jira"],
       "jira_projects": ["PROJ"]
     }
   ]

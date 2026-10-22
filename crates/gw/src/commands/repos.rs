@@ -17,6 +17,9 @@ struct RepoRow {
     /// Present only when `--dirty` asked for it.
     dirty: Option<usize>,
     last_commit_age_secs: Option<i64>,
+    /// Ticket providers the layout's own convention names.
+    ticket_providers: Vec<String>,
+    /// Project filters its ticket rules declare.
     jira_projects: Vec<String>,
 }
 
@@ -82,6 +85,13 @@ fn inspect(slug: &str, root: &Path, want_dirty: bool) -> Result<RepoRow, Error> 
             Vec::new()
         }
     };
+    let ticket_providers = match crate::settings::declared_ticket_providers(root) {
+        Ok(providers) => providers,
+        Err(e) => {
+            eprintln!("warning: {slug}: {e}");
+            Vec::new()
+        }
+    };
 
     Ok(RepoRow {
         slug: slug.to_string(),
@@ -89,6 +99,7 @@ fn inspect(slug: &str, root: &Path, want_dirty: bool) -> Result<RepoRow, Error> 
         worktrees,
         dirty: want_dirty.then_some(dirty),
         last_commit_age_secs: newest.map(|epoch| (now - epoch).max(0)),
+        ticket_providers,
         jira_projects,
     })
 }
@@ -101,6 +112,7 @@ fn print_json(rows: &[RepoRow]) {
         worktrees: usize,
         dirty: Option<usize>,
         last_commit_age_secs: Option<i64>,
+        ticket_providers: &'a [String],
         jira_projects: &'a [String],
     }
 
@@ -112,6 +124,7 @@ fn print_json(rows: &[RepoRow]) {
             worktrees: row.worktrees,
             dirty: row.dirty,
             last_commit_age_secs: row.last_commit_age_secs,
+            ticket_providers: &row.ticket_providers,
             jira_projects: &row.jira_projects,
         })
         .collect();
@@ -128,12 +141,19 @@ fn print_table(rows: &[RepoRow], with_dirty: bool) {
         row.last_commit_age_secs
             .map_or_else(|| "—".to_string(), short_age)
     };
-    let jira = |row: &RepoRow| {
-        if row.jira_projects.is_empty() {
-            "—".to_string()
-        } else {
+    // Show the provider and its project filter together, so a layout that
+    // uses Linear is not labelled "JIRA".
+    let ticket_column = |row: &RepoRow| match (
+        row.ticket_providers.is_empty(),
+        row.jira_projects.is_empty(),
+    ) {
+        (true, _) => "—".to_string(),
+        (false, true) => row.ticket_providers.join(","),
+        (false, false) => format!(
+            "{}:{}",
+            row.ticket_providers.join(","),
             row.jira_projects.join(",")
-        }
+        ),
     };
 
     if with_dirty {
@@ -142,7 +162,7 @@ fn print_table(rows: &[RepoRow], with_dirty: bool) {
             "WORKTREES",
             "DIRTY",
             "LAST COMMIT",
-            "JIRA",
+            "TICKETS",
         ])];
         for row in rows {
             table.push([
@@ -150,19 +170,19 @@ fn print_table(rows: &[RepoRow], with_dirty: bool) {
                 row.worktrees.to_string(),
                 row.dirty.unwrap_or(0).to_string(),
                 last_commit(row),
-                jira(row),
+                ticket_column(row),
             ]);
         }
         println!("{}", layout_rows(&table));
     } else {
         let mut table: Vec<[String; 4]> =
-            vec![heading(["REPO", "WORKTREES", "LAST COMMIT", "JIRA"])];
+            vec![heading(["REPO", "WORKTREES", "LAST COMMIT", "TICKETS"])];
         for row in rows {
             table.push([
                 row.slug.clone(),
                 row.worktrees.to_string(),
                 last_commit(row),
-                jira(row),
+                ticket_column(row),
             ]);
         }
         println!("{}", layout_rows(&table));

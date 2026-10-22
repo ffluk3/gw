@@ -50,14 +50,19 @@ the branch only when each of these conditions is true:
 - the branch is not protected
 - the last commit is older than the stale limit
 
-## Skip the GitHub lookup
+## Skip a lookup
 
 ```bash
-gw clean --skip-github --yes
+gw clean --skip-provider github --yes
+gw clean --skip-provider jira,github --yes
 ```
 
-Without GitHub, `gw` cannot see merged PRs, so it removes fewer worktrees. You
-can also set `GW_SKIP_GITHUB=1`.
+A skipped provider reports nothing, so `gw` removes fewer worktrees: without
+change information it cannot see a merge, and without ticket information it
+cannot see a closed ticket. Nothing is removed on a missing fact.
+
+`--skip-github` and `GW_SKIP_GITHUB` still work and mean the same as
+`--skip-provider github`.
 
 ## Restore an object that you deleted
 

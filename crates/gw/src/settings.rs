@@ -1,6 +1,6 @@
 use gw_core::ProviderId;
 
-use crate::convention_file::{Loaded, Origin};
+use crate::convention_file::Loaded;
 
 /// Per-layout settings, resolved from configuration files and the command line.
 ///
@@ -33,17 +33,35 @@ impl Settings {
     }
 }
 
-/// Read only the JIRA projects declared by a layout, ignoring the global layer.
+/// Ticket provider names a layout's own convention references.
 ///
 /// Used by `gw repos`, which reports each repository's own configuration
 /// rather than the convention that would apply to it.
+pub fn declared_ticket_providers(
+    root: &std::path::Path,
+) -> Result<Vec<String>, crate::error::Error> {
+    let loaded = crate::convention_file::load_layout_only(root)?;
+    let mut seen = std::collections::BTreeSet::new();
+    Ok(loaded
+        .convention
+        .ticket_rules
+        .iter()
+        .filter(|rule| seen.insert(rule.provider.clone()))
+        .map(|rule| rule.provider.to_string())
+        .collect())
+}
+
+/// Ticket project filters a layout's own convention declares.
+///
+/// The legacy `[jira] project` value when present, otherwise the
+/// `allow_projects` of its embedded rules, so a layout that uses only
+/// `[convention]` still reports what it narrowed to.
 pub fn declared_projects(root: &std::path::Path) -> Result<Vec<String>, crate::error::Error> {
-    let loaded = crate::convention_file::load(root)?;
-    // The layout file is the last source read; fall back to whatever the
-    // effective convention narrowed to when it declared nothing.
-    if loaded.ticket_rules_origin == Origin::Layout || !loaded.jira_project.is_empty() {
+    let loaded = crate::convention_file::load_layout_only(root)?;
+    if !loaded.jira_project.is_empty() {
         return Ok(loaded.jira_project);
     }
+    let mut seen = std::collections::BTreeSet::new();
     Ok(loaded
         .convention
         .ticket_rules
@@ -51,6 +69,7 @@ pub fn declared_projects(root: &std::path::Path) -> Result<Vec<String>, crate::e
         .flat_map(|rule| match &rule.selector {
             gw_core::TicketSelector::Embedded { allow_projects, .. } => allow_projects.clone(),
         })
+        .filter(|project| seen.insert(project.to_ascii_uppercase()))
         .collect())
 }
 

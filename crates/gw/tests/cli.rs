@@ -673,6 +673,36 @@ fn repos_lists_layouts_under_the_root() {
     assert!(rows[0]["worktrees"].as_u64().unwrap() >= 1);
 }
 
+/// `gw repos` reports what each layout declares, not the convention that
+/// would apply to it. A layout that names a non-JIRA provider must not be
+/// labelled with one.
+#[test]
+fn repos_reports_the_layouts_own_ticket_provider() {
+    let fx = Fixture::new();
+    let outer = tempfile::tempdir().unwrap();
+    let repos = outer.path().join("repos");
+    link_layout(&fx, &repos, "acme/widgets");
+    std::fs::write(
+        repos.join("acme/widgets/.gw.toml"),
+        r#"
+[[convention.ticket_rules]]
+provider = "linear"
+selector = "embedded"
+pattern = 'eng-(?P<id>[0-9]+)'
+"#,
+    )
+    .unwrap();
+
+    let out = gw_with_env(
+        outer.path(),
+        &["repos", "--json"],
+        &[("GW_REPOS_ROOT", repos.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(json["repos"][0]["ticket_providers"], json!(["linear"]));
+}
+
 // ---- configurable JIRA project --------------------------------------------
 
 fn ticket_for<'a>(json: &'a serde_json::Value, branch: &str) -> &'a serde_json::Value {

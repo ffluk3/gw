@@ -78,6 +78,21 @@ Provider failures never become facts. A failed lookup produces an `unknown`
 observation, which cannot justify removal. The command continues and reports
 what it could observe.
 
+## Portability in practice
+
+A provider needs only to answer the questions it was asked. It does not know
+that its answers are compared against another provider's, and it does not
+decide whether a match matters. Two consequences follow:
+
+- A team can add GitLab or Linear with configuration and a small local
+  program, without a new adapter in `gw` and without changing the classifier.
+- The decision rules are identical for every tool. Reviewing them once covers
+  every combination of tracker and code host.
+
+The built-in providers are the JIRA and GitHub adapters, because those are what
+the original tool supported. They have no special status in the model: `jira`
+and `github` are simply the names of two providers that ship in the binary.
+
 ## What the convention does not do
 
 The convention does not run commands, read files, or call the network. It only
