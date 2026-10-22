@@ -107,12 +107,22 @@ impl CommandProvider {
             })?;
 
         if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(request.to_string().as_bytes())
-                .map_err(|e| Error::Lookup {
-                    service,
-                    detail: format!("could not write to `{program}` ({e})"),
-                })?;
+            // A command that exits without reading its input closes the pipe,
+            // and the write then fails with EPIPE. That is not a broken
+            // provider: the command's own exit status and stderr are the real
+            // failure, and `wait_with_output` below reports them. Treating the
+            // broken pipe as an error here would replace that diagnosis with a
+            // misleading "could not write" and race the child's exit.
+            match stdin.write_all(request.to_string().as_bytes()) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {}
+                Err(e) => {
+                    return Err(Error::Lookup {
+                        service,
+                        detail: format!("could not write to `{program}` ({e})"),
+                    })
+                }
+            }
         }
 
         let output = child.wait_with_output().map_err(|e| Error::Lookup {
@@ -490,6 +500,32 @@ mod coverage_tests {
         );
         let error = provider.run(&serde_json::json!({})).unwrap_err();
         assert!(error.to_string().contains("boom"), "{error}");
+    }
+
+    /// A command may exit before reading its input, which closes the pipe
+    /// under the parent's write. The report must be the command's own failure,
+    /// not a "could not write" caused by losing that race.
+    #[test]
+    fn a_command_that_never_reads_stdin_reports_its_own_failure() {
+        let provider = CommandProvider::new(
+            ProviderId::parse("host").unwrap(),
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                // No read from stdin at all, so the pipe is closed immediately.
+                "echo 'the real problem' >&2; exit 3".into(),
+            ],
+            Capability::Change,
+        );
+        let error = provider
+            .run(&serde_json::json!({"big": "x".repeat(100_000)}))
+            .unwrap_err();
+        let message = error.to_string();
+        assert!(message.contains("the real problem"), "{message}");
+        assert!(
+            !message.contains("could not write"),
+            "a closed pipe replaced the real diagnosis: {message}"
+        );
     }
 
     #[test]
