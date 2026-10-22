@@ -279,7 +279,7 @@ or `resolution`) with `reason`.
 | `ticket_rules_origin` | string | `built-in`, `global`, `default-branch`, or `layout`. |
 | `change_rules` | array | In evaluation order. |
 | `change_rules_origin` | string | Same values as above. |
-| `providers` | array | Each provider, whether it is active, and why not. |
+| `providers` | array | The built-in `jira` and `github` providers, whether each is active, and why not. Declared `kind = "command"` providers are not listed. |
 | `settings` | object | The resolved `[clean]`, `[providers]`, and `[discovery]` values. |
 | `sources` | array | Files read, lowest precedence first. |
 
@@ -293,7 +293,7 @@ The object is additive; adding it changed no existing field.
 | `stale_after_origin` | string | Where it came from: `built-in`, `global`, `default-branch`, or `layout`. |
 | `protect` | array | Extra protected branches from the files. |
 | `protect_origin` | string | Where the list came from: `built-in`, `global`, `default-branch`, or `layout`. |
-| `skip` | array | Providers the files ask to skip. This is the file layer; `providers[].active` reflects a flag or environment override. |
+| `skip` | array | Providers the files ask to skip. This is the file layer; `providers[].active` for the built-in providers reflects a flag or environment override. |
 | `skip_origin` | string | Where the file list came from. |
 | `repos_root` | string or null | The configured repos root, when the global file sets one. |
 | `repos_root_origin` | string | Where it came from. |

@@ -20,7 +20,7 @@ Configuration resolves from five sources. Precedence is highest first:
 - If both are set, `GW_CONFIG` wins.
 
 There is exactly one way to configure a provider or a rule: `[convention]`.
-No shorthand table exists beside it, so two files can never disagree about
+No shorthand table exists beside it, so no two layers can disagree about
 where a value comes from. Three further tables configure the behavior around
 conventions: `[clean]`, `[providers]`, and `[discovery]`.
 
@@ -164,7 +164,11 @@ skip = ["jira"]
 of `--skip-provider` and `GW_SKIP_PROVIDERS`. A flag or environment list with
 at least one non-empty entry **replaces** the file list. Entries that are empty
 after trimming are ignored. If the list is absent, or every entry is empty, the
-file list applies.
+file list applies. An invalid non-empty provider id in the flag or the
+environment is a usage error (exit 2); it never clears the file list silently.
+A valid id is one with the provider-id grammar that also names a provider the
+run knows: the built-in `jira` or `github`, or an id that a file declares. A
+typo such as `jria` is refused rather than treated as a replacement.
 
 Replacement is the user's explicit choice for that invocation. It is not a
 safety argument: a provider that a layout skipped because it is not
@@ -172,8 +176,11 @@ authoritative there can answer once it is re-enabled, and that answer can
 change a verdict. Skipping withholds observations; it does not make them
 safer.
 
-`gw convention show --json` reports the file list in `settings.skip` and the
-effective list after replacement in `providers[].active`.
+`gw convention show --json` reports the file list in `settings.skip`. The
+`providers` array lists only the built-in `jira` and `github` providers, and
+each `active` field reflects the effective selection after a flag or
+environment replacement. A skipped `kind = "command"` provider is not listed
+there, so its absence does not by itself say whether it was skipped.
 
 This table is not `[convention.providers]`. `[convention.providers.<id>]`
 *declares* a provider; `[providers] skip` *leaves one out* of the run.
@@ -218,7 +225,7 @@ names it. A value from a flag or a variable wins over the file.
 | --- | --- | --- | --- |
 | `GW_STALE_DAYS` | `[clean] stale_after` | Stale limit. The variable is whole days; the file accepts a duration such as `"5w"`. | `7d` |
 | `GW_PROTECT` | `[clean] protect` | Branch names that `gw` must never delete. The variable is comma-separated. It **adds** to the file list and never removes a name. An invalid non-empty name is a usage error (exit 2). | — |
-| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. A list with at least one non-empty entry replaces the file list; empty entries are ignored, and an all-empty list inherits the files. | — |
+| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. A list with at least one non-empty entry replaces the file list; empty entries are ignored, and an all-empty list inherits the files. An invalid non-empty id — bad grammar or no such provider — is a usage error (exit 2). | — |
 | `GW_REPOS_ROOT` | `[discovery] repos_root` | Directory that holds layouts. `gw` expands a leading `~/` in either form. | `~/repos` |
 | `GW_JIRA_BASE_URL` | `[convention.providers.jira] base_url` | JIRA base URL. The environment wins when both are set. An empty value falls back to the file. A `jira` provider entry must still exist. | — |
 

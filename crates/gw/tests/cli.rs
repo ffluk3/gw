@@ -2665,6 +2665,55 @@ fn a_skip_flag_replaces_the_file_skip_list() {
     assert_eq!(jira["active"], false, "the flag did not skip jira: {json}");
 }
 
+#[test]
+fn an_invalid_skip_provider_id_is_a_usage_error() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[providers]\nskip = [\"github\"]\n");
+
+    // A typo must not count as a replacement that clears the file list and
+    // skips nothing. It is a usage error naming the bad id and the grammar.
+    for (args, env) in [
+        (
+            vec!["convention", "show", "--json", "--skip-provider", "jria"],
+            vec![("GW_REPO", fx.root.to_str().unwrap())],
+        ),
+        (
+            vec!["convention", "show", "--json"],
+            vec![
+                ("GW_REPO", fx.root.to_str().unwrap()),
+                ("GW_SKIP_PROVIDERS", "jria"),
+            ],
+        ),
+    ] {
+        let out = gw_with_env(&fx.bare(), &args, &env);
+        assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+        assert!(out.stderr.contains("jria"), "{}", out.stderr);
+        assert!(out.stderr.contains("known providers"), "{}", out.stderr);
+        assert!(out.stdout.trim().is_empty(), "stdout: {}", out.stdout);
+    }
+
+    // The failed runs did not alter the file's list: without the bad id,
+    // github is still skipped.
+    let ok = gw_with_env(
+        &fx.bare(),
+        &["convention", "show", "--json"],
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(ok.code, 0, "stderr: {}", ok.stderr);
+    let json: serde_json::Value = serde_json::from_str(&ok.stdout).expect("valid json");
+    assert_eq!(json["settings"]["skip"][0], "github");
+    let github = json["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "github")
+        .unwrap();
+    assert_eq!(
+        github["active"], false,
+        "the file's skip list was silently cleared: {json}"
+    );
+}
+
 fn branch_exists(fx: &Fixture, name: &str) -> bool {
     let out = Command::new("git")
         .current_dir(fx.bare())

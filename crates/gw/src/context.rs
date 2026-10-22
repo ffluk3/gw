@@ -52,7 +52,7 @@ impl Context {
         let default_branch = git.default_branch()?;
         let layer = default_branch_layer(&layout, default_branch.as_ref());
         let loaded = crate::convention_file::load(&layout.root, layer.as_deref())?;
-        let registry = Registry::build(&loaded, skip_providers(cli, &loaded));
+        let registry = Registry::build(&loaded, skip_providers(cli, &loaded)?);
         let convention = loaded.convention.clone();
 
         Ok(Self {
@@ -126,31 +126,76 @@ fn default_branch_layer(layout: &Layout, branch: Option<&gw_core::BranchName>) -
 /// files when at least one entry is non-empty after trimming. If the flag is
 /// absent, or every entry is empty, the file list applies.
 ///
+/// An invalid non-empty id from the flag or the environment is a usage error.
+/// Dropping it silently would clear the file's skip list while quietly failing
+/// to skip the provider the user named — less skipping than either input asked
+/// for. "Invalid" covers both a syntactically bad slug and a well-formed slug
+/// that names no provider, because a typo such as `jria` is exactly the case
+/// that used to clear the file list. The file list is validated where it is
+/// parsed; here an unparseable entry is still ignored so a bad file cannot be
+/// masked by the flag path.
+///
 /// Replacement is the user's explicit per-invocation choice, not a safety
 /// guarantee. A provider that a layout skipped because it is not authoritative
 /// there can answer once it is re-enabled, and that answer can change a
 /// verdict. Skipping only withholds observations; it does not make them safer.
-fn skip_providers(cli: &Cli, loaded: &crate::convention_file::Loaded) -> Vec<ProviderId> {
+fn skip_providers(
+    cli: &Cli,
+    loaded: &crate::convention_file::Loaded,
+) -> Result<Vec<ProviderId>, Error> {
     let flag: Vec<&str> = cli
         .skip_provider
         .iter()
         .map(|raw| raw.trim())
         .filter(|raw| !raw.is_empty())
         .collect();
-    let selected: Vec<&str> = if flag.is_empty() {
-        loaded
+    if flag.is_empty() {
+        return Ok(loaded
             .provider_selection
             .skip
             .iter()
             .map(|raw| raw.trim())
-            .collect()
-    } else {
-        flag
-    };
-    selected
-        .into_iter()
-        .filter_map(|raw| ProviderId::parse(raw).ok())
+            .filter_map(|raw| ProviderId::parse(raw).ok())
+            .collect());
+    }
+    let known = known_provider_ids(loaded);
+    flag.into_iter()
+        .map(|raw| {
+            let id = ProviderId::parse(raw).map_err(|e| {
+                Error::Usage(format!(
+                    "invalid provider id '{raw}' in --skip-provider or \
+                     GW_SKIP_PROVIDERS: {e}; provider ids are 1-64 characters \
+                     with no whitespace, control characters, or ':', '/', or '\\'"
+                ))
+            })?;
+            if !known.contains(&id) {
+                let names: Vec<&str> = known.iter().map(ProviderId::as_str).collect();
+                return Err(Error::Usage(format!(
+                    "invalid provider id '{raw}' in --skip-provider or \
+                     GW_SKIP_PROVIDERS: no provider with that id; known providers \
+                     are {}",
+                    names.join(", ")
+                )));
+            }
+            Ok(id)
+        })
         .collect()
+}
+
+/// Every provider id a run could select: the built-ins plus every provider the
+/// files declare. Used to refuse a skip id that names nothing.
+fn known_provider_ids(
+    loaded: &crate::convention_file::Loaded,
+) -> std::collections::BTreeSet<ProviderId> {
+    let mut ids: std::collections::BTreeSet<ProviderId> = loaded
+        .providers
+        .iter()
+        .map(|config| config.id.clone())
+        .collect();
+    for raw in ["jira", "github"] {
+        ids.insert(ProviderId::parse(raw).expect("literal is valid"));
+    }
+    ids
 }
 
 /// Infer the worktrees directory from the worktrees git actually reports.
@@ -231,18 +276,71 @@ mod coverage_tests {
     }
 
     #[test]
-    fn skip_providers_ignores_invalid_slugs() {
+    fn skip_providers_trims_valid_slugs() {
         let cli = Cli {
             repo: None,
             json: false,
             no_color: false,
-            skip_provider: vec!["github".into(), "a:b".into(), " jira ".into()],
+            skip_provider: vec!["github".into(), " jira ".into()],
             command: Command::Status(crate::cli::StatusArgs {}),
         };
-        let skipped = skip_providers(&cli, &crate::convention_file::Loaded::default());
+        let skipped =
+            skip_providers(&cli, &crate::convention_file::Loaded::default()).expect("valid ids");
         assert_eq!(skipped.len(), 2);
         assert_eq!(skipped[0].as_str(), "github");
         assert_eq!(skipped[1].as_str(), "jira");
+    }
+
+    #[test]
+    fn an_invalid_flag_slug_is_a_usage_error() {
+        // A layout skip list must not be cleared by a typo: the call fails
+        // before any effective selection is built. `jria` is a well-formed
+        // slug, so this also proves the id is checked against real providers.
+        let loaded = crate::convention_file::Loaded {
+            provider_selection: crate::convention_file::ProviderSelection {
+                skip: vec!["github".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        for (raw, expected) in [("jria", "known providers"), ("a:b", "1-64")] {
+            let cli = Cli {
+                repo: None,
+                json: false,
+                no_color: false,
+                skip_provider: vec![raw.into()],
+                command: Command::Status(crate::cli::StatusArgs {}),
+            };
+            let err = skip_providers(&cli, &loaded).expect_err("invalid id must be refused");
+            let message = err.to_string();
+            assert!(message.contains(raw), "{message}");
+            assert!(message.contains("GW_SKIP_PROVIDERS"), "{message}");
+            assert!(message.contains(expected), "{message}");
+        }
+    }
+
+    #[test]
+    fn a_declared_provider_may_be_skipped() {
+        let cli = Cli {
+            repo: None,
+            json: false,
+            no_color: false,
+            skip_provider: vec!["linear".into()],
+            command: Command::Status(crate::cli::StatusArgs {}),
+        };
+        let loaded = crate::convention_file::Loaded {
+            providers: vec![crate::convention_file::ProviderConfig {
+                id: ProviderId::parse("linear").unwrap(),
+                kind: Some("command".into()),
+                base_url: None,
+                done_status_category: None,
+                command: None,
+            }],
+            ..Default::default()
+        };
+        let skipped = skip_providers(&cli, &loaded).expect("a declared id is known");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].as_str(), "linear");
     }
 
     #[test]
@@ -261,7 +359,7 @@ mod coverage_tests {
             },
             ..Default::default()
         };
-        let skipped = skip_providers(&cli, &loaded);
+        let skipped = skip_providers(&cli, &loaded).expect("valid ids");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].as_str(), "github");
     }
@@ -284,7 +382,7 @@ mod coverage_tests {
             },
             ..Default::default()
         };
-        let skipped = skip_providers(&cli, &loaded);
+        let skipped = skip_providers(&cli, &loaded).expect("valid ids");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].as_str(), "jira");
     }
@@ -305,7 +403,7 @@ mod coverage_tests {
             },
             ..Default::default()
         };
-        let skipped = skip_providers(&cli, &loaded);
+        let skipped = skip_providers(&cli, &loaded).expect("valid ids");
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].as_str(), "jira");
     }
