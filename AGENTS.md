@@ -137,16 +137,24 @@ Docs are MkDocs + Material, organized by Diátaxis, under `docs/`:
 | `docs/tutorials/` | Learning from zero |
 | `docs/how-to/` | Task recipes |
 | `docs/reference/` | Flags, config, JSON, exit codes, layout |
-| `docs/explanation/` | Design rationale |
+| `docs/explanation/` | Design rationale for users (nav: "User Manual") |
+| `docs/developer/` | Design rationale for contributors (nav: "Developer Manual") |
 
 `mkdocs.yml` sets `strict: true`, and CI builds with `mkdocs build --strict`;
 a page not in `nav:` or a broken link fails the build. `site/` is generated and
 git-ignored — never edit it.
 
 **A behavior change is not done until the matching doc is updated.** The
-authoritative rationale lives in `docs/explanation/architecture.md`,
-`decision-model.md`, `clean-safety.md`, and `layout.md`; read the relevant one
-before changing that area, and keep it true.
+authoritative rationale lives in `docs/developer/architecture.md`,
+`decision-model.md`, `conventions.md`, `layout.md`, and
+`docs/explanation/clean-safety.md`; read the relevant one before changing that
+area, and keep it true. Follow `docs/developer/docs-style.md`: narrative pages
+(home, User Manual, Developer Manual) use plain English, while how-to steps,
+reference tables, and the ordered safety checks stay in Simplified Technical
+English.
+
+Do not rename `docs/explanation/`. Its nav label is "User Manual" but
+`skills/gw/SKILL.md` links the published pages by absolute GitHub URL.
 
 ## Scope discipline
 

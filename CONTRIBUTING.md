@@ -72,6 +72,52 @@ commit triggers one.
 `gw` is distributed through GitHub Releases, so nothing is published to
 crates.io. `release-plz.toml` sets `git_only = true` for that reason.
 
+## Documentation
+
+If your change alters behavior, update the matching doc. Before you write or
+restructure a page, read [`docs/developer/docs-style.md`](docs/developer/docs-style.md);
+it explains the audience split between the User Manual and the Developer
+Manual, and the different voice each one uses.
+
+### Set up the docs toolchain
+
+CI builds the site with `mkdocs build --strict`, so a broken link, a missing
+anchor, or a page left out of `nav:` fails the build. Install the same tools
+locally before you edit a page.
+
+The simplest way, if you have [`uv`](https://docs.astral.sh/uv/):
+
+```bash
+uv tool install mkdocs --with "mkdocs-material>=9.5,<10"
+```
+
+Without `uv`, use a virtual environment so the tools stay off your system
+Python:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-docs.txt
+```
+
+Either method puts `mkdocs` on your `PATH`. Confirm it:
+
+```bash
+mkdocs --version
+```
+
+### Preview and check the site
+
+```bash
+mkdocs serve              # live preview at http://127.0.0.1:8000
+mkdocs build --strict     # the same check CI runs
+```
+
+`mkdocs serve` rebuilds on save. Run `mkdocs build --strict` before you open a
+pull request: `serve` reports link problems as warnings, and only the strict
+build turns them into a failure. `site/` is generated output and is
+git-ignored — never edit it by hand.
+
 ## Before you open a pull request
 
 ```bash
@@ -79,4 +125,9 @@ crates.io. `release-plz.toml` sets `git_only = true` for that reason.
 cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 cargo test --all
+mkdocs build --strict
 ```
+
+Run the docs build when you touch `docs/`, `mkdocs.yml`, or
+`requirements-docs.txt`. CI only runs the docs workflow for those paths, but a
+local strict build catches the same failures before you push.

@@ -2,12 +2,27 @@
 
 Manage git worktrees in a bare-repo layout.
 
-`gw` keeps one checkout for each branch, and one bare repository backs them
-all. To change a branch, you change directory. You do not stash your work.
+You're reviewing PROJ-101 when a bug lands in PROJ-102. Normally you stash,
+switch, fix, switch back, and hope the stash still applies.
+
+`gw` gives every branch its own checkout. You change tasks by changing
+directory — nothing is stashed, and nothing is lost.
+
+```text
+# Without gw                          # With gw
+git stash                             gw add --cd PROJ-102
+git switch PROJ-102                   ... fix the bug ...
+... fix the bug ...                   cd ../PROJ-101
+git switch PROJ-101
+git stash pop    # hope it applies
+```
+
+`gw` manages a **layout**: one bare repository (history, no files) plus one
+checkout per branch.
 
 ```text
 <root>/
-  .bare/               the bare repository
+  .bare/               the shared repository
   worktrees/<branch>/  one checkout per branch
 ```
 
@@ -54,6 +69,20 @@ gw --version
 To pin a version, pass `--version v1.2.3`. To install to another directory,
 pass `--dir DIR`.
 
+## Why not just use `git worktree`?
+
+Git already has worktrees; `gw` is a thin layer over them and does not replace
+`git`. What it adds is the bookkeeping:
+
+| You want to... | Plain git | `gw` |
+| --- | --- | --- |
+| Open a ticket you already opened | `git worktree add` fails: the branch is checked out | `gw add` reuses the checkout |
+| Delete a pushed, unmerged branch | `git branch -d` refuses; you use `-D` and hope | Deletes after proving every commit is on a remote |
+| Know what to clean up | `git worktree list`, then judge each one | `gw clean` prints a plan with a reason per row |
+
+[The docs](docs/index.md) have the full comparison, including what `gw`
+deliberately does not do.
+
 ## Quick start
 
 ```bash
@@ -74,23 +103,23 @@ gw clean --yes
 
 ## Documentation
 
-The full documentation is in [`docs/`](docs/index.md). It follows the
-[Diátaxis](https://diataxis.fr/) framework:
+The full documentation is the MkDocs site in [`docs/`](docs/index.md). Start
+with the [tutorial](docs/tutorials/getting-started.md), or go straight to the
+[User Manual](docs/explanation/index.md) to understand the model, the
+[how-to guides](docs/how-to/index.md) for a task, or the
+[reference](docs/reference/index.md) for a flag. To use `gw` from an AI agent,
+see the [skill](skills/gw/SKILL.md).
 
-| Goal | Start here |
-| --- | --- |
-| Learn the tool from zero | [Tutorial](docs/tutorials/getting-started.md) |
-| Do a specific task | [How-to guides](docs/how-to/index.md) |
-| Look up a flag or setting | [Reference](docs/reference/index.md) |
-| Understand the design | [Explanation](docs/explanation/index.md) |
-| Use `gw` from an AI agent | [Agent skill](skills/gw/SKILL.md) |
-
-The docs are a MkDocs site. To preview them locally:
+To preview the site locally:
 
 ```bash
-pip install mkdocs-material
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements-docs.txt
 mkdocs serve
 ```
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md#documentation) for the full docs setup
+and the strict build that CI runs.
 
 ## Development
 
