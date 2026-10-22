@@ -2,7 +2,7 @@
 
 Each how-to guide solves one task. The guides assume that you have a working
 layout and that you know the basics. They do not teach concepts. Follow the
-links to [explanation](../explanation/index.md) for the concepts.
+links to the [User Manual](../explanation/index.md) for the concepts.
 
 ## Layouts
 

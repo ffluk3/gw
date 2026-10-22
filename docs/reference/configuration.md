@@ -78,7 +78,7 @@ strength = "identity"                            # default
 | `selector` | string | `embedded` is the only selector today. |
 | `pattern` | string | A regular expression applied to the branch name. The named group `id`, or the first capture group, is the ticket identifier. Without a group, the whole match is. |
 | `allow_projects` | list | Accept only these leading prefixes, compared case-insensitively. Empty means any. |
-| `strength` | string | `identity` or `mention`. See [evidence strength](../explanation/conventions.md#evidence-strength). |
+| `strength` | string | `identity` or `mention`. See [evidence strength](../developer/conventions.md#evidence-strength). |
 
 Rules are evaluated in order. The first rule that matches a branch supplies
 its primary ticket. An uncompilable `pattern` stops the command with exit

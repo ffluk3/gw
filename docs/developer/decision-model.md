@@ -26,7 +26,7 @@ its consequence. The shell implementation expressed the same rule as an
 ordered `if`/`elif` ladder in two passes, where the order was implicit.
 
 Precedence is as important as the cases. `gw` tests each protecting fact before
-each destroying fact. [The safety rules](clean-safety.md) give the order.
+each destroying fact. [The safety rules](../explanation/clean-safety.md) give the order.
 
 ## Decisions carry their evidence
 

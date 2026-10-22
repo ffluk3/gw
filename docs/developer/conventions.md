@@ -86,7 +86,7 @@ state to measure it by.
 
 Closed-ticket removal is off by default. `gw clean` reports the worktrees it
 would remove with `--closed` and removes nothing until you pass the flag. See
-[the order of the checks](clean-safety.md).
+[the order of the checks](../explanation/clean-safety.md).
 
 ### Where the claim stops
 
@@ -110,7 +110,7 @@ Each rule declares how strongly a match proves ownership of a branch.
 
 Only identity evidence may justify destruction. A worktree that mentions
 `PROJ-1` in passing is not the worktree for `PROJ-1`, and removing it would be
-the exact mistake the [safety rules](clean-safety.md) exist to prevent. Mention
+the exact mistake the [safety rules](../explanation/clean-safety.md) exist to prevent. Mention
 evidence may inform display and, at most, a recommendation.
 
 ## Contested facts are not evidence

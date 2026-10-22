@@ -1,4 +1,4 @@
-# The layout and discovery model
+# Repositories and discovery
 
 `gw` has no configuration that gives the location of a repository. It
 observes the directory structure.

@@ -13,7 +13,7 @@ and commands to match your tools.
 
 The default. Writing it out is useful when you want to add a project list
 globally. See [why the default is one branch to one
-ticket](../explanation/conventions.md#why-the-default-is-one-branch-to-one-ticket)
+ticket](../developer/conventions.md#why-the-default-is-one-branch-to-one-ticket)
 before you replace it:
 
 ```toml

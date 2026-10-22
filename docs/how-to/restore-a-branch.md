@@ -42,4 +42,4 @@ git -C <root>/.bare fetch origin PROJ-1:refs/heads/PROJ-1
 
 The classifier carries the tip commit as a required field of each delete
 decision. `gw` cannot plan a branch deletion without the data to restore the
-branch. See [the decision model](../explanation/decision-model.md).
+branch. See [the decision model](../developer/decision-model.md).

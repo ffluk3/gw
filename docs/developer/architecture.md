@@ -44,7 +44,7 @@ and JIRA, and applies plans.
 ## Why a typed git trait
 
 `GitBackend` is a trait with one method for each operation, not a generic
-`run(args)`. There are two results. A fake is easy to write, and each failure
+`run(args)`. This has two results: a fake is easy to write, and each failure
 mode has a name in the type system instead of a string in a log.
 
 ## Why `curl` instead of an HTTP client

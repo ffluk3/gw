@@ -1,15 +1,29 @@
-# Explanation
+# User Manual
 
-Explanation pages discuss why `gw` works the way it does. They give background
-and context. They are not step-by-step instructions.
+These pages explain *why* `gw` works the way it does, for people who use it.
+They are not step-by-step instructions; the [how-to guides](../how-to/index.md)
+cover the commands.
 
-- [Why a bare-repo worktree layout](why-worktree-layout.md) — the problem that
-  the layout solves.
-- [The layout and discovery model](layout.md) — how `gw` decides which
-  repository it addresses.
-- [`gw clean` safety rules](clean-safety.md) — the order of the checks and why
-  they fail closed.
-- [The decision model](decision-model.md) — verdicts, decisions, and plans.
-- [Conventions and providers](conventions.md) — what a branch name means, and
-  which systems `gw` asks.
-- [Architecture](architecture.md) — the pure core and the I/O shell.
+Read them in this order:
+
+1. **[Why one checkout per branch](why-worktree-layout.md)** — the problem
+   worktrees solve, why the repository is bare, and what you get that plain git
+   does not.
+2. **[Is it safe to delete?](clean-safety.md)** — the exact checks `gw clean`
+   runs, and why an unknown answer always means "keep".
+
+## Words you will see
+
+| Term | Means |
+| --- | --- |
+| **layout** | One bare repository plus one checkout for each branch, in one directory. |
+| **bare repository** | A copy of the repository with history but no files checked out. Every worktree shares it. |
+| **worktree** | One checkout of one branch, in its own directory, with its own `HEAD`. |
+| **repos root** | The directory where layouts live, `~/repos` by default (`GW_REPOS_ROOT`). |
+| **provider** | A system `gw` asks about your work, such as JIRA for tickets or GitHub for pull requests. |
+| **convention** | The rule that turns a branch name into a ticket or pull request lookup. |
+
+## Working on `gw` itself?
+
+The [Developer Manual](../developer/index.md) covers the decision model, the
+branch-to-ticket mapping, discovery internals, and the crate layout.

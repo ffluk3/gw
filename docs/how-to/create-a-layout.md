@@ -46,5 +46,5 @@ command for the existing layout:
 gw --repo ~/src/widgets status
 ```
 
-See [the layout explanation](../explanation/layout.md) for why this is a hard
+See [repositories and discovery](../developer/layout.md) for why this is a hard
 stop.
