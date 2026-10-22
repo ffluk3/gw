@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0](https://github.com/ffluk3/gw/compare/v0.5.0...v0.6.0) - 2026-10-22
+
+### Added
+
+- *(config)* enforce flag > env > layout > default-branch > global precedence
+- add more configurations to the toml config file
+- *(providers)* add an out-of-process provider protocol
+- *(convention)* configure the convention in .gw.toml and ~/.gw.toml
+- genericize and add repo-root and JIRA project configuration
+- git worktree manager for bare-repo layouts
+
+### Fixed
+
+- *(config)* reject invalid skip provider ids instead of clearing file list
+- *(config)* honor NO_COLOR by presence and keep provider kind across layers
+- support standard json flows
+- satisfy clippy on the pinned toolchain
+
+### Other
+
+- release v0.5.0
+- release v0.4.0
+- *(test)* up code coverage across the board
+- release v0.3.0
+- remove aliases
+- release v0.2.0
+- [**breaking**] remove the pre-convention configuration surface
+- *(convention)* split branch meaning from provider access
+- release v0.1.2
+- Merge pull request #3 from ffluk3/release-plz-2026-10-21T22-58-16Z
+- release v0.1.1
+- release v0.1.0
+- correct clippy findings
+
 ## [0.5.0](https://github.com/ffluk3/gw/compare/v0.4.0...v0.5.0) - 2026-10-22
 
 ### Added
