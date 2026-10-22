@@ -233,7 +233,7 @@ mod tests {
     }
 
     #[test]
-    fn action_names_cover_every_decision() {
+    fn read_only_decisions_are_named_keep_and_skip() {
         let r = || Reason::Protected;
         assert_eq!(action(&Decision::Keep { reason: r() }), "keep");
         assert_eq!(action(&Decision::Skip { reason: r() }), "skip");

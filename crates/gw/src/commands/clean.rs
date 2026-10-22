@@ -45,15 +45,15 @@ fn validate(args: &CleanArgs, json: bool, stdin_tty: bool, stdout_tty: bool) -> 
                 .into(),
         ));
     }
+    if args.delete_branches {
+        return Err(Error::Usage(
+            "--interactive selects worktrees only; run without --delete-branches".into(),
+        ));
+    }
     if !stdin_tty || !stdout_tty {
         return Err(Error::Usage(
             "--interactive needs a terminal on stdin and stdout; use --dry-run or --yes for scripts"
                 .into(),
-        ));
-    }
-    if args.delete_branches {
-        return Err(Error::Usage(
-            "--interactive selects worktrees only; run without --delete-branches".into(),
         ));
     }
     Ok(())

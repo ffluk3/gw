@@ -350,8 +350,23 @@ fn clean_interactive_without_a_terminal_is_a_usage_error_not_a_dry_run() {
 #[test]
 fn clean_interactive_rejects_delete_branches() {
     let fx = Fixture::new();
-    let out = fx.gw(&["clean", "--interactive", "--delete-branches"]);
+    let wt = fx.add_worktree("PROJ-23");
+    fx.publish("PROJ-23");
+
+    let out = fx.gw(&[
+        "clean",
+        "--interactive",
+        "--delete-branches",
+        "--stale-days",
+        "0",
+    ]);
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("--delete-branches"),
+        "stderr: {}",
+        out.stderr
+    );
+    assert!(wt.is_dir(), "a rejected invocation removed a worktree");
 }
 
 #[test]
