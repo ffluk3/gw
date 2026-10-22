@@ -52,14 +52,17 @@ nav:
       - Exit codes: reference/exit-codes.md
       - JSON output: reference/json.md
       - Providers: reference/providers.md
-  - Explanation:
+  - User Manual:
       - explanation/index.md
-      - Why a worktree layout: explanation/why-worktree-layout.md
-      - Layout and discovery: explanation/layout.md
-      - Clean safety rules: explanation/clean-safety.md
-      - Conventions and providers: explanation/conventions.md
-      - Decision model: explanation/decision-model.md
-      - Architecture: explanation/architecture.md
+      - Why one checkout per branch: explanation/why-worktree-layout.md
+      - Is it safe to delete?: explanation/clean-safety.md
+  - Developer Manual:
+      - developer/index.md
+      - Architecture notes: developer/architecture.md
+      - The decision model: developer/decision-model.md
+      - Repositories and discovery: developer/layout.md
+      - Conventions and providers: developer/conventions.md
+      - Writing the docs: developer/docs-style.md
 
 markdown_extensions:
   - admonition
