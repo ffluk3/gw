@@ -1241,3 +1241,258 @@ fn explain_skips_a_ticket_dependent_change_rule() {
     assert_eq!(json["rules"][0]["matched"], json!(false));
     assert_eq!(json["changes"], json!([]));
 }
+
+// ---- out-of-process providers ---------------------------------------------
+//
+// These tests write a small executable that speaks the provider protocol, so
+// the mapping under test is the real one: a branch name, a convention, a
+// process boundary, and a decision.
+
+/// Write an executable script that echoes a fixed protocol-1 response.
+fn fake_provider(dir: &Path, name: &str, response: &str) -> PathBuf {
+    let path = dir.join(name);
+    std::fs::write(
+        &path,
+        format!("#!/bin/sh\ncat > /dev/null\ncat <<'JSON'\n{response}\nJSON\n"),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    path
+}
+
+#[test]
+fn a_command_provider_resolves_a_non_jira_ticket() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    let provider = fake_provider(
+        scripts.path(),
+        "linear",
+        r#"{"protocol":1,"results":[{"id":"eng-42","state":"closed","resolution":"Done","summary":"Fix it"}]}"#,
+    );
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            r#"
+[convention.providers.linear]
+kind = "command"
+command = "{}"
+
+[[convention.ticket_rules]]
+provider = "linear"
+selector = "embedded"
+pattern = 'eng-(?P<id>[0-9]+)'
+
+[[convention.change_rules]]
+provider = "github"
+selector = "head_branch"
+"#,
+            provider.display()
+        ),
+    )
+    .unwrap();
+    fx.add_worktree("eng-42");
+
+    let out = fx.gw(&["convention", "explain", "eng-42", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(json["tickets"][0]["provider"], "linear");
+    assert_eq!(json["tickets"][0]["id"], "42");
+    assert_eq!(json["rules"][0]["provider_active"], json!(true));
+}
+
+/// The full loop: a command provider reports a merged change for a branch
+/// whose name is unrelated to its ticket, and the worktree is removed.
+#[test]
+fn clean_removes_a_worktree_when_a_command_provider_reports_a_merge() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    let provider = fake_provider(
+        scripts.path(),
+        "host",
+        r##"{"protocol":1,"results":[{"branch":"topic-ish-name","state":"merged","reference":"#7"}]}"##,
+    );
+    let wt = fx.add_worktree("topic-ish-name");
+    fx.publish("topic-ish-name");
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            r#"
+[convention.providers.host]
+kind = "command"
+command = "{}"
+
+[[convention.change_rules]]
+provider = "host"
+selector = "head_branch"
+"#,
+            provider.display()
+        ),
+    )
+    .unwrap();
+
+    let out = fx.gw(&["clean", "--yes", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(
+        json["applied"],
+        json!(true),
+        "stderr: {} json: {json}",
+        out.stderr
+    );
+    assert!(
+        !wt.exists(),
+        "a merged change from a command provider did not remove the worktree: {json}"
+    );
+}
+
+/// A provider that violates the protocol must not be read as "not merged".
+#[test]
+fn a_broken_command_provider_never_removes_a_worktree() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    let provider = scripts.path().join("broken");
+    std::fs::write(&provider, "#!/bin/sh\necho not-json\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let wt = fx.add_worktree("PROJ-broken");
+    fx.publish("PROJ-broken");
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            r#"
+[convention.providers.host]
+kind = "command"
+command = "{}"
+
+[[convention.change_rules]]
+provider = "host"
+selector = "head_branch"
+"#,
+            provider.display()
+        ),
+    )
+    .unwrap();
+
+    let out = fx.gw(&["clean", "--yes", "--json", "--stale-days", "0"]);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)
+        .unwrap_or_else(|e| panic!("stdout is not JSON ({e}): {:?}", out.stdout));
+    let removed = json["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["action"] == "remove" && entry["reason"] == "merged_pr");
+    assert!(!removed, "a malformed response produced a merge: {json}");
+    // The stale rule may still apply; what matters is that the merge rule did
+    // not. The stale removal is legitimate, so the test does not assert that
+    // the directory survived.
+    let _ = wt;
+}
+
+/// Two providers disagree. Neither answer may justify removal.
+#[test]
+fn a_contested_merge_from_two_command_providers_removes_nothing() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    let merged = fake_provider(
+        scripts.path(),
+        "merged",
+        r#"{"protocol":1,"results":[{"branch":"PROJ-9","state":"merged"}]}"#,
+    );
+    let broken = scripts.path().join("broken");
+    std::fs::write(&broken, "#!/bin/sh\ncat > /dev/null\nexit 3\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&broken, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let wt = fx.add_worktree("PROJ-9");
+    fx.publish("PROJ-9");
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            r#"
+[convention.providers.merged]
+kind = "command"
+command = "{}"
+
+[convention.providers.broken]
+kind = "command"
+command = "{}"
+
+[[convention.change_rules]]
+provider = "merged"
+selector = "head_branch"
+
+[[convention.change_rules]]
+provider = "broken"
+selector = "head_branch"
+"#,
+            merged.display(),
+            broken.display()
+        ),
+    )
+    .unwrap();
+
+    let out = fx.gw(&["clean", "--yes", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let removed = json["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["action"] == "remove");
+    assert!(!removed, "a contested merge removed a worktree: {json}");
+    assert!(wt.is_dir(), "the worktree directory is gone");
+}
+
+/// Two worktrees, one provider, one selector. Each must receive its own
+/// answer. Before this was keyed by branch, the first answer was applied to
+/// both, so a merge on one branch could authorize removing the other.
+#[test]
+fn each_worktree_receives_its_own_change_answer() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    let provider = fake_provider(
+        scripts.path(),
+        "host",
+        r#"{"protocol":1,"results":[
+            {"branch":"merged-one","state":"merged"},
+            {"branch":"open-one","state":"open"}
+        ]}"#,
+    );
+    let merged = fx.add_worktree("merged-one");
+    let open = fx.add_worktree("open-one");
+    fx.publish("merged-one");
+    fx.publish("open-one");
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        format!(
+            r#"
+[convention.providers.host]
+kind = "command"
+command = "{}"
+
+[[convention.change_rules]]
+provider = "host"
+selector = "head_branch"
+"#,
+            provider.display()
+        ),
+    )
+    .unwrap();
+
+    let out = fx.gw(&["clean", "--yes", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(!merged.exists(), "the merged worktree was not removed");
+    assert!(
+        open.exists(),
+        "the open worktree was removed: the first answer was applied to both"
+    );
+}

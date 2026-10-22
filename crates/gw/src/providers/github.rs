@@ -125,13 +125,25 @@ impl ChangeProvider for GhCli {
 
     fn lookup(
         &self,
-        repo: &str,
+        repo: &crate::commands::snapshot::RepoRef,
         queries: &[ChangeQuery],
         limits: Limits,
     ) -> Result<Vec<ChangeObservation>, Error> {
+        // The GitHub adapter is the only place that decides a remote is not a
+        // GitHub one. Gating this in the command layer would make the GitHub
+        // assumption apply to every provider.
+        let Some(slug) = repo.slug.as_deref() else {
+            return Err(Error::Lookup {
+                service: "github",
+                detail: format!(
+                    "origin is not a GitHub remote: {}",
+                    repo.remote.as_deref().unwrap_or("(no origin)")
+                ),
+            });
+        };
         let mut observations = Vec::with_capacity(queries.len());
         for chunk in queries.chunks(limits.max_queries.max(1)) {
-            let answers = self.query_chunk(repo, chunk)?;
+            let answers = self.query_chunk(slug, chunk)?;
             for query in chunk {
                 let state = answers.iter().find(|(key, _)| key == &query.key()).map_or(
                     ChangeState::Unknown {
@@ -143,6 +155,7 @@ impl ChangeProvider for GhCli {
                     provider: self.id.clone(),
                     strength: query.strength,
                     selector: query.selector.as_str().to_string(),
+                    branch: query.branch.clone(),
                     state,
                 });
             }

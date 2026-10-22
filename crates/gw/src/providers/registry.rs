@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 
 use gw_core::ProviderId;
 
+use crate::providers::command::{Capability, CommandProvider};
 use crate::providers::{ChangeProvider, TicketProvider, Unavailable};
 use crate::settings::Settings;
 
@@ -35,8 +36,63 @@ impl Registry {
 
         registry.add_jira(loaded);
         registry.add_github(settings);
+        registry.add_commands(loaded);
 
         registry
+    }
+
+    /// Add every `kind = "command"` provider.
+    ///
+    /// A command provider is added to whichever capability its rules name, so
+    /// one command can back tickets, changes, or both.
+    fn add_commands(&mut self, loaded: &crate::convention_file::Loaded) {
+        for config in &loaded.providers {
+            if config.kind != "command" {
+                continue;
+            }
+            if self.skipped.contains(&config.id) {
+                continue;
+            }
+            let Some(argv) = config.command.clone().filter(|argv| !argv.is_empty()) else {
+                self.unavailable.push(Unavailable {
+                    id: config.id.clone(),
+                    reason: "kind = \"command\" needs a command".into(),
+                });
+                continue;
+            };
+
+            let backs_tickets = loaded
+                .convention
+                .ticket_rules
+                .iter()
+                .any(|rule| rule.provider == config.id);
+            let backs_changes = loaded
+                .convention
+                .change_rules
+                .iter()
+                .any(|rule| rule.provider == config.id);
+
+            if backs_tickets {
+                self.tickets.push(Box::new(CommandProvider::new(
+                    config.id.clone(),
+                    argv.clone(),
+                    Capability::Ticket,
+                )));
+            }
+            if backs_changes {
+                self.changes.push(Box::new(CommandProvider::new(
+                    config.id.clone(),
+                    argv,
+                    Capability::Change,
+                )));
+            }
+            if !backs_tickets && !backs_changes {
+                self.unavailable.push(Unavailable {
+                    id: config.id.clone(),
+                    reason: "no convention rule names this provider".into(),
+                });
+            }
+        }
     }
 
     #[must_use]

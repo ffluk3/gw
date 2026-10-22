@@ -83,6 +83,7 @@ fn change_observation(rng: &mut Rng) -> ChangeObservation {
             Strength::Mention
         },
         selector: "head_branch".into(),
+        branch: "PROJ-1".into(),
         state,
     }
 }
@@ -467,6 +468,7 @@ fn change(strength: Strength, state: ChangeState) -> ChangeObservation {
         provider: provider("github"),
         strength,
         selector: "head_branch".into(),
+        branch: "PROJ-1".into(),
         state,
     }
 }
@@ -623,4 +625,41 @@ fn an_uncontested_merged_change_still_removes() {
         Decision::Remove { .. } => true,
         _ => d.reason() != &gw_core::Reason::Stale { age_secs: RESOLVE },
     }));
+}
+
+/// A ticket observation at mention strength present alongside a closed
+/// identity-strength ticket must not rescue or block the identity answer.
+#[test]
+fn mention_strength_observations_do_not_participate_in_the_fold() {
+    // Fresh activity, so the ticket rule is the first signal that applies.
+    let mut worktree = clean_stale_worktree(
+        vec![
+            ticket(
+                Strength::Identity,
+                TicketStatus::Closed {
+                    resolution: Some("Done".into()),
+                },
+            ),
+            ticket(Strength::Mention, TicketStatus::Open),
+        ],
+        vec![],
+    );
+    worktree.activity = Activity {
+        age_secs: 0,
+        source: ActivitySource::CommitDate,
+    };
+    let snap = snapshot_with(worktree);
+    let plan = classify_clean(
+        &snap,
+        &Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        },
+    );
+    assert!(
+        plan.entries
+            .iter()
+            .any(|(_, d)| matches!(d.reason(), gw_core::Reason::TicketClosed { .. })),
+        "a mention-strength observation blocked an identity-strength answer: {plan:?}"
+    );
 }

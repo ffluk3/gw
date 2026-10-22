@@ -198,11 +198,12 @@ pub fn attach_changes(
             else {
                 continue;
             };
-            // Providers answer one observation per query, in query order, and
-            // each query's selector is recorded on its answer.
+            // Match on the branch as well as the selector: two worktrees can
+            // share a provider and a selector, and the first answer must not
+            // be applied to both.
             if let Some(answer) = answers
                 .iter()
-                .find(|a| a.selector == query.selector.as_str())
+                .find(|a| a.selector == query.selector.as_str() && a.branch == query.branch)
             {
                 let mut observation = answer.clone();
                 observation.strength = query.strength;
@@ -212,11 +213,29 @@ pub fn attach_changes(
     }
 }
 
-/// The `owner/name` slug a change provider needs, when the origin supplies one.
+/// How a change provider should identify the repository.
+///
+/// The slug is `owner/name` when the origin is a GitHub remote, which is what
+/// the GitHub adapter needs. Every provider also gets the raw remote, so a
+/// provider for a different host is not blocked by a parser it does not use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepoRef {
+    pub remote: Option<String>,
+    pub slug: Option<String>,
+}
+
+impl RepoRef {
+    #[must_use]
+    pub fn from_remote(remote: Option<String>) -> Self {
+        let slug = remote.as_deref().and_then(crate::config::repo_slug);
+        Self { remote, slug }
+    }
+}
+
+/// The repository the snapshot describes, as a change provider sees it.
 #[must_use]
-pub fn repo_slug_for(ctx: &Context) -> Option<String> {
-    let remote = ctx.git.remote_url().ok().flatten()?;
-    crate::config::repo_slug(&remote)
+pub fn repo_ref_for(ctx: &Context) -> RepoRef {
+    RepoRef::from_remote(ctx.git.remote_url().ok().flatten())
 }
 
 /// Ticket lookups grouped by provider, in the order providers first appear.
@@ -286,7 +305,7 @@ pub fn observe_tickets(
 #[must_use]
 pub fn observe_changes(
     registry: &Registry,
-    repo: &str,
+    repo: &RepoRef,
     queries: &[ChangeQuery],
     limits: Limits,
 ) -> Vec<(ProviderId, Vec<ChangeObservation>)> {
@@ -308,6 +327,7 @@ pub fn observe_changes(
                             provider: provider.clone(),
                             strength: q.strength,
                             selector: q.selector.as_str().to_string(),
+                            branch: q.branch.clone(),
                             state: gw_core::ChangeState::Unknown {
                                 detail: e.to_string(),
                             },

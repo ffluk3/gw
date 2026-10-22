@@ -155,11 +155,17 @@ impl ChangeState {
 }
 
 /// One change observation, tied back to the query that produced it.
+///
+/// `branch` is part of the observation rather than only of the query because a
+/// provider answers a batch positionally. Without it, attaching answers to
+/// worktrees would key on provider and selector alone, and the second
+/// worktree would receive the first worktree's answer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct ChangeObservation {
     pub provider: ProviderId,
     pub strength: Strength,
     pub selector: String,
+    pub branch: String,
     pub state: ChangeState,
 }
 

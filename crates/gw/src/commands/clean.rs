@@ -41,28 +41,26 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     let registry = ctx.registry();
     let limits = Limits::default();
 
-    // Merged changes.
+    // Merged changes. Each provider decides for itself whether it understands
+    // this remote; a provider that does not reports why, rather than making the
+    // worktree silently look unmerged.
     let queries = snapshot::change_queries(&snap, &ctx.convention);
     if !queries.is_empty() {
-        match snapshot::repo_slug_for(ctx) {
-            Some(slug) => {
-                let progress = format!(
-                    "🔄 Checking {} for {} merged change(s)...",
-                    queries.first().map_or("provider", |q| q.provider.as_str()),
-                    queries.len()
-                );
-                if ctx.is_json() {
-                    eprintln!("{progress}");
-                } else {
-                    println!("{progress}");
-                }
-                let observed = snapshot::observe_changes(registry, &slug, &queries, limits);
-                snapshot::attach_changes(&mut snap, &ctx.convention, &observed);
-            }
-            None => {
-                eprintln!("warning: origin is not a supported code host; skipping change lookup");
-            }
+        let branches: std::collections::BTreeSet<&str> =
+            queries.iter().map(|q| q.branch.as_str()).collect();
+        let progress = format!(
+            "🔄 Checking {} change(s) across {} worktree(s)...",
+            queries.len(),
+            branches.len()
+        );
+        if ctx.is_json() {
+            eprintln!("{progress}");
+        } else {
+            println!("{progress}");
         }
+        let repo = snapshot::repo_ref_for(ctx);
+        let observed = snapshot::observe_changes(registry, &repo, &queries, limits);
+        snapshot::attach_changes(&mut snap, &ctx.convention, &observed);
     }
 
     // Tickets.

@@ -39,6 +39,7 @@ nav:
       - Open or reuse a worktree: how-to/add-worktree.md
       - Read the status table: how-to/read-status.md
       - Use JIRA: how-to/configure-jira.md
+      - Use a convention recipe: how-to/convention-recipes.md
       - Remove worktrees: how-to/clean-worktrees.md
       - Restore a branch: how-to/restore-a-branch.md
       - Script with JSON: how-to/script-with-json.md
@@ -50,6 +51,7 @@ nav:
       - Layout on disk: reference/layout.md
       - Exit codes: reference/exit-codes.md
       - JSON output: reference/json.md
+      - Providers: reference/providers.md
   - Explanation:
       - explanation/index.md
       - Why a worktree layout: explanation/why-worktree-layout.md

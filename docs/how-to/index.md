@@ -21,6 +21,10 @@ links to [explanation](../explanation/index.md) for the concepts.
 - [Remove stale and merged worktrees](clean-worktrees.md)
 - [Restore a deleted branch](restore-a-branch.md)
 
+## Connecting tools
+
+- [Use a convention recipe](convention-recipes.md)
+
 ## Scripting
 
 - [Parse `gw` output in a script](script-with-json.md)

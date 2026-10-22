@@ -10,3 +10,4 @@ learning. Each fact on these pages is a behavior of the installed binary.
   rules.
 - [Exit codes](exit-codes.md) — the meaning of each code.
 - [JSON output](json.md) — the stable machine-readable shapes.
+- [Providers](providers.md) — the built-in adapters and the command protocol.

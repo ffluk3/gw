@@ -5,6 +5,7 @@
 //! ticket came from JIRA, Linear, or a local command. Selection lives in
 //! [`registry`], and the meaning of a branch lives in `gw_core::convention`.
 
+pub mod command;
 pub mod github;
 pub mod jira;
 pub mod registry;
@@ -49,9 +50,13 @@ pub trait ChangeProvider {
     fn id(&self) -> &ProviderId;
 
     /// Answer each query, one observation per query.
+    ///
+    /// The provider receives the repository as git reports it plus the
+    /// `owner/name` slug when the remote has one. One adapter must not have to
+    /// understand another host's remote syntax.
     fn lookup(
         &self,
-        repo: &str,
+        repo: &crate::commands::snapshot::RepoRef,
         queries: &[ChangeQuery],
         limits: Limits,
     ) -> Result<Vec<ChangeObservation>, Error>;
