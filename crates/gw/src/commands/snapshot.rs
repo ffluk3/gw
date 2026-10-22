@@ -1,13 +1,15 @@
 use std::collections::BTreeSet;
 
 use gw_core::{
-    Activity, ActivitySource, BranchName, BranchSnapshot, Dirty, Layout, ReachableSet,
-    RepoSnapshot, TicketStatus, WorktreeKind, WorktreeSnapshot,
+    Activity, ActivitySource, BranchName, BranchSnapshot, ChangeObservation, ChangeQuery,
+    Convention, Dirty, Layout, ProviderId, ReachableSet, RepoSnapshot, Strength, TicketId,
+    TicketObservation, TicketRef, TicketStatus, WorktreeKind, WorktreeSnapshot,
 };
 
 use crate::context::Context;
 use crate::error::Error;
 use crate::git::GitBackend;
+use crate::providers::{Limits, Registry};
 
 /// Gather every fact the classifier is allowed to see.
 ///
@@ -49,8 +51,8 @@ pub fn load(ctx: &Context, now: i64) -> Result<RepoSnapshot, Error> {
             kind,
             dirty,
             activity,
-            ticket: TicketStatus::NotChecked,
-            merged_pr: false,
+            tickets: Vec::new(),
+            changes: Vec::new(),
         });
     }
 
@@ -108,69 +110,224 @@ fn protected_set(
     Ok(protected)
 }
 
-/// Attach GitHub merge state to the snapshot.
-pub fn attach_merged(snapshot: &mut RepoSnapshot, merged: &std::collections::HashSet<String>) {
-    for wt in &mut snapshot.worktrees {
-        if let Some(branch) = &wt.branch {
-            wt.merged_pr = merged.contains(branch.as_str());
+/// Every ticket reference the convention derives from the snapshot's branches.
+///
+/// Deduplicated by `(provider, id)` because two branches can name one ticket.
+#[must_use]
+pub fn ticket_refs(snapshot: &RepoSnapshot, convention: &Convention) -> Vec<TicketRef> {
+    let mut seen: BTreeSet<(ProviderId, TicketId)> = BTreeSet::new();
+    let mut refs = Vec::new();
+    for wt in &snapshot.worktrees {
+        let Some(branch) = &wt.branch else { continue };
+        for ticket in convention.resolve(branch.as_str()).tickets {
+            if seen.insert((ticket.provider.clone(), ticket.id.clone())) {
+                refs.push(ticket);
+            }
         }
     }
+    refs.sort_by(|a, b| a.provider.cmp(&b.provider).then_with(|| a.id.cmp(&b.id)));
+    refs
 }
 
-/// Attach JIRA ticket state to the snapshot.
+/// Every change query the convention derives from the snapshot's worktrees.
 ///
-/// `projects` restricts which branch prefixes count as tickets; an empty slice
-/// accepts any JIRA-shaped key.
+/// Only linked and prunable worktrees are queried. The bare entry has no
+/// worktree to remove, and asking a host about it would be network work that no
+/// decision can use.
+#[must_use]
+pub fn change_queries(snapshot: &RepoSnapshot, convention: &Convention) -> Vec<ChangeQuery> {
+    let mut queries = Vec::new();
+    for wt in &snapshot.worktrees {
+        if !matches!(wt.kind, WorktreeKind::Linked | WorktreeKind::Prunable) {
+            continue;
+        }
+        let Some(branch) = &wt.branch else { continue };
+        queries.extend(convention.resolve(branch.as_str()).changes);
+    }
+    queries
+}
+
+/// Attach ticket observations to the worktrees whose convention referenced them.
+///
+/// Every reference gets an observation. When no active provider answered, the
+/// observation is `NotChecked`: the branch *does* name that ticket, which is
+/// what the display and JSON `ticket` field report, but no state was observed.
+/// That is neither `Open` nor `Unknown`, so it changes no decision.
 pub fn attach_tickets(
     snapshot: &mut RepoSnapshot,
-    info: &crate::jira::TicketInfo,
-    projects: &[String],
+    convention: &Convention,
+    observations: &[TicketObservation],
 ) {
     for wt in &mut snapshot.worktrees {
         let Some(branch) = &wt.branch else { continue };
-        let Some(key) = branch.ticket_key_for(projects) else {
-            continue;
-        };
-        if let Some(status) = info.status.get(key.as_str()) {
-            wt.ticket = status.clone();
+        for reference in convention.resolve(branch.as_str()).tickets {
+            let matched = observations
+                .iter()
+                .find(|o| o.provider == reference.provider && o.id == reference.id);
+            wt.tickets.push(match matched {
+                // Strength comes from the convention, not the provider: the
+                // provider has no idea how the branch was matched.
+                Some(observation) => TicketObservation {
+                    strength: reference.strength,
+                    ..observation.clone()
+                },
+                None => TicketObservation {
+                    provider: reference.provider.clone(),
+                    id: reference.id.clone(),
+                    strength: reference.strength,
+                    status: TicketStatus::NotChecked,
+                    summary: None,
+                },
+            });
         }
     }
 }
 
-/// Branch names eligible for a merged-PR lookup.
-///
-/// Only branches whose worktree directory is named after them are queried, to
-/// preserve the shell implementation's guard against mismatched checkouts.
-pub fn pr_candidates(snapshot: &RepoSnapshot) -> Vec<BranchName> {
-    snapshot
-        .worktrees
-        .iter()
-        .filter(|wt| matches!(wt.kind, WorktreeKind::Linked | WorktreeKind::Prunable))
-        .filter_map(|wt| {
-            let branch = wt.branch.as_ref()?;
-            let folder = wt.path.file_name()?.to_str()?;
-            if folder != branch.as_str() {
-                return None;
+/// Attach change observations to the worktrees whose queries produced them.
+pub fn attach_changes(
+    snapshot: &mut RepoSnapshot,
+    convention: &Convention,
+    observations: &[(ProviderId, Vec<ChangeObservation>)],
+) {
+    for wt in &mut snapshot.worktrees {
+        let Some(branch) = &wt.branch else { continue };
+        for query in convention.resolve(branch.as_str()).changes {
+            let Some((_, answers)) = observations
+                .iter()
+                .find(|(provider, _)| provider == &query.provider)
+            else {
+                continue;
+            };
+            // Providers answer one observation per query, in query order, and
+            // each query's selector is recorded on its answer.
+            if let Some(answer) = answers
+                .iter()
+                .find(|a| a.selector == query.selector.as_str())
+            {
+                let mut observation = answer.clone();
+                observation.strength = query.strength;
+                wt.changes.push(observation);
             }
-            Some(branch.clone())
-        })
-        .collect()
+        }
+    }
 }
 
-/// Total ticket keys referenced by the snapshot.
-pub fn ticket_keys(snapshot: &RepoSnapshot, projects: &[String]) -> Vec<gw_core::TicketKey> {
-    let mut keys: Vec<_> = snapshot
-        .worktrees
-        .iter()
-        .filter_map(|wt| {
-            wt.branch
-                .as_ref()
-                .and_then(|branch| branch.ticket_key_for(projects))
-        })
-        .collect();
-    keys.sort();
-    keys.dedup();
-    keys
+/// The `owner/name` slug a change provider needs, when the origin supplies one.
+#[must_use]
+pub fn repo_slug_for(ctx: &Context) -> Option<String> {
+    let remote = ctx.git.remote_url().ok().flatten()?;
+    crate::config::repo_slug(&remote)
+}
+
+/// Ticket lookups grouped by provider, in the order providers first appear.
+#[must_use]
+pub fn tickets_by_provider(refs: &[TicketRef]) -> Vec<(ProviderId, Vec<TicketId>)> {
+    let mut grouped: Vec<(ProviderId, Vec<TicketId>)> = Vec::new();
+    for reference in refs {
+        match grouped.iter_mut().find(|(p, _)| p == &reference.provider) {
+            Some((_, ids)) => ids.push(reference.id.clone()),
+            None => grouped.push((reference.provider.clone(), vec![reference.id.clone()])),
+        }
+    }
+    grouped
+}
+
+/// Change queries grouped by provider, in the order providers first appear.
+#[must_use]
+pub fn queries_by_provider(queries: &[ChangeQuery]) -> Vec<(ProviderId, Vec<ChangeQuery>)> {
+    let mut grouped: Vec<(ProviderId, Vec<ChangeQuery>)> = Vec::new();
+    for query in queries {
+        match grouped.iter_mut().find(|(p, _)| p == &query.provider) {
+            Some((_, list)) => list.push(query.clone()),
+            None => grouped.push((query.provider.clone(), vec![query.clone()])),
+        }
+    }
+    grouped
+}
+
+/// Run the ticket lookups a convention asks for.
+///
+/// Every failure becomes an `Unknown` observation for the affected provider,
+/// never an error: a tracker that is down must not stop `gw` from reporting
+/// worktrees, and must not look like "no tickets".
+#[must_use]
+pub fn observe_tickets(
+    registry: &Registry,
+    refs: &[TicketRef],
+    limits: Limits,
+) -> Vec<TicketObservation> {
+    let mut observations = Vec::new();
+    for (provider, ids) in tickets_by_provider(refs) {
+        let Some(backend) = registry.ticket_provider(&provider) else {
+            warn_inactive(registry, &provider);
+            continue;
+        };
+        match backend.lookup(&ids, limits) {
+            Ok(mut answered) => observations.append(&mut answered),
+            Err(e) => {
+                eprintln!("warning: {e}");
+                eprintln!("         continuing without {provider} ticket information");
+                observations.extend(ids.into_iter().map(|id| TicketObservation {
+                    provider: provider.clone(),
+                    id,
+                    strength: Strength::Identity,
+                    status: TicketStatus::Unknown {
+                        detail: e.to_string(),
+                    },
+                    summary: None,
+                }));
+            }
+        }
+    }
+    observations
+}
+
+/// Run the change lookups a convention asks for.
+#[must_use]
+pub fn observe_changes(
+    registry: &Registry,
+    repo: &str,
+    queries: &[ChangeQuery],
+    limits: Limits,
+) -> Vec<(ProviderId, Vec<ChangeObservation>)> {
+    let mut observed = Vec::new();
+    for (provider, list) in queries_by_provider(queries) {
+        let Some(backend) = registry.change_provider(&provider) else {
+            warn_inactive(registry, &provider);
+            continue;
+        };
+        match backend.lookup(repo, &list, limits) {
+            Ok(answers) => observed.push((provider, answers)),
+            Err(e) => {
+                eprintln!("warning: {e}");
+                eprintln!("         continuing without {provider} change information");
+                observed.push((
+                    provider.clone(),
+                    list.iter()
+                        .map(|q| ChangeObservation {
+                            provider: provider.clone(),
+                            strength: q.strength,
+                            selector: q.selector.as_str().to_string(),
+                            state: gw_core::ChangeState::Unknown {
+                                detail: e.to_string(),
+                            },
+                        })
+                        .collect(),
+                ));
+            }
+        }
+    }
+    observed
+}
+
+/// Say why a provider the convention named did not answer.
+///
+/// Silence would be indistinguishable from "asked, found nothing", and both
+/// leave a worktree alone for very different reasons.
+fn warn_inactive(registry: &Registry, provider: &ProviderId) {
+    if let Some(reason) = registry.inactive_reason(provider) {
+        eprintln!("warning: provider {provider} is inactive ({reason})");
+    }
 }
 
 /// Whether `path` is inside the configured worktrees directory.

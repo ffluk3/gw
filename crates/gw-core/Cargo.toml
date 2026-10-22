@@ -7,6 +7,7 @@ license.workspace = true
 description = "Pure domain logic for gw: worktree classification, planning, rendering"
 
 [dependencies]
+regex = "1.13.1"
 serde = { workspace = true }
 serde_json = { workspace = true }
 unicode-width = "0.2"

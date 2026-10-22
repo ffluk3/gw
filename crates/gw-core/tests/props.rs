@@ -6,8 +6,9 @@
 
 use gw_core::classify::classify_clean;
 use gw_core::{
-    Activity, ActivitySource, BranchName, BranchSnapshot, Decision, Dirty, Layout, Policy,
-    ReachableSet, RepoSnapshot, Sha, Target, TicketStatus, WorktreeKind, WorktreeSnapshot,
+    Activity, ActivitySource, BranchName, BranchSnapshot, ChangeObservation, ChangeState, Decision,
+    Dirty, Layout, Policy, ProviderId, ReachableSet, RepoSnapshot, Sha, Strength, Target, TicketId,
+    TicketObservation, TicketStatus, WorktreeKind, WorktreeSnapshot,
 };
 use std::path::PathBuf;
 
@@ -32,6 +33,57 @@ impl Rng {
 
     fn bool(&mut self) -> bool {
         self.next().is_multiple_of(2)
+    }
+}
+
+fn provider(raw: &str) -> ProviderId {
+    ProviderId::parse(raw).expect("valid provider id")
+}
+
+/// A ticket observation with a randomized state, including the two states that
+/// must never justify destruction on their own: unknown, and mention-strength.
+fn ticket_observation(rng: &mut Rng) -> TicketObservation {
+    let status = match rng.next() % 4 {
+        0 => TicketStatus::Closed {
+            resolution: Some("Done".into()),
+        },
+        1 => TicketStatus::Open,
+        2 => TicketStatus::NotChecked,
+        _ => TicketStatus::Unknown {
+            detail: "probe failed".into(),
+        },
+    };
+    TicketObservation {
+        provider: provider("jira"),
+        id: TicketId::parse("PROJ-1").expect("valid id"),
+        strength: if rng.bool() {
+            Strength::Identity
+        } else {
+            Strength::Mention
+        },
+        status,
+        summary: None,
+    }
+}
+
+fn change_observation(rng: &mut Rng) -> ChangeObservation {
+    let state = match rng.next() % 4 {
+        0 => ChangeState::Merged { reference: None },
+        1 => ChangeState::Open { reference: None },
+        2 => ChangeState::Unknown {
+            detail: "probe failed".into(),
+        },
+        _ => ChangeState::Merged { reference: None },
+    };
+    ChangeObservation {
+        provider: provider("github"),
+        strength: if rng.bool() {
+            Strength::Identity
+        } else {
+            Strength::Mention
+        },
+        selector: "head_branch".into(),
+        state,
     }
 }
 
@@ -78,14 +130,16 @@ fn snapshot(rng: &mut Rng, day: i64) -> (RepoSnapshot, Vec<Sha>) {
                 age_secs: age_days * day,
                 source: *rng.pick(&[ActivitySource::CommitDate, ActivitySource::Unknown]),
             },
-            ticket: if rng.bool() {
-                TicketStatus::Closed {
-                    resolution: Some("Done".into()),
-                }
+            tickets: if rng.bool() {
+                vec![ticket_observation(rng)]
             } else {
-                TicketStatus::NotChecked
+                Vec::new()
             },
-            merged_pr: rng.bool(),
+            changes: if rng.bool() {
+                vec![change_observation(rng)]
+            } else {
+                Vec::new()
+            },
         });
     }
 
@@ -325,13 +379,14 @@ fn closed_tickets_are_only_removed_when_opted_in() {
                 continue;
             };
             let wt = snap.worktrees.iter().find(|w| &w.path == path).unwrap();
-            if wt.ticket.closed_resolution().is_none() {
+            let Some(resolution) = wt.closed_ticket_resolution() else {
                 continue;
-            }
+            };
+            assert!(!resolution.is_empty());
             // With a closed ticket and no opt-in, the only legitimate removals
             // are ones justified by a stronger, already-enabled reason.
             if matches!(decision, Decision::Remove { .. }) {
-                let justified = wt.merged_pr || wt.activity.age_secs >= 7 * DAY;
+                let justified = wt.has_merged_change() || wt.activity.age_secs >= 7 * DAY;
                 assert!(
                     justified,
                     "seed={seed} removed a closed-ticket worktree without --closed and no other reason"
@@ -345,7 +400,7 @@ fn closed_tickets_are_only_removed_when_opted_in() {
                 && !snap.is_worktree_protected(wt.branch.as_ref().expect("linked has a branch"))
                 && wt.dirty == Dirty::Clean
                 && wt.head.as_ref().is_some_and(|h| snap.reachable.contains(h))
-                && !wt.merged_pr
+                && !wt.has_merged_change()
                 && !(wt.activity.source != ActivitySource::Unknown
                     && wt.activity.age_secs >= 7 * DAY);
             if reaches_ticket_rule {
@@ -356,4 +411,216 @@ fn closed_tickets_are_only_removed_when_opted_in() {
             }
         }
     }
+}
+
+// ---- convention and provider evidence --------------------------------------
+//
+// The facts below are what a provider reported, and the properties say what
+// such a fact may never do. They are separate from the worktree properties
+// above because they hold even when every other fact would allow removal.
+
+/// A worktree whose only remaining reason to remove it is a provider fact.
+fn clean_stale_worktree(
+    tickets: Vec<TicketObservation>,
+    changes: Vec<ChangeObservation>,
+) -> WorktreeSnapshot {
+    let head = sha_for(1);
+    WorktreeSnapshot {
+        path: PathBuf::from("/repo/worktrees/PROJ-1"),
+        branch: Some(BranchName::parse("PROJ-1").unwrap()),
+        head: Some(head.clone()),
+        kind: WorktreeKind::Linked,
+        dirty: Dirty::Clean,
+        activity: Activity {
+            age_secs: 30 * DAY,
+            source: ActivitySource::CommitDate,
+        },
+        tickets,
+        changes,
+    }
+}
+
+fn snapshot_with(worktree: WorktreeSnapshot) -> RepoSnapshot {
+    RepoSnapshot {
+        layout: Layout::new(PathBuf::from("/repo")),
+        default_branch: Some(BranchName::parse("develop").unwrap()),
+        head_branch: Some(BranchName::parse("develop").unwrap()),
+        protected: Default::default(),
+        reachable: ReachableSet::new(vec![sha_for(1)]),
+        worktrees: vec![worktree],
+        orphans: vec![],
+    }
+}
+
+fn ticket(strength: Strength, status: TicketStatus) -> TicketObservation {
+    TicketObservation {
+        provider: provider("jira"),
+        id: TicketId::parse("PROJ-1").unwrap(),
+        strength,
+        status,
+        summary: None,
+    }
+}
+
+fn change(strength: Strength, state: ChangeState) -> ChangeObservation {
+    ChangeObservation {
+        provider: provider("github"),
+        strength,
+        selector: "head_branch".into(),
+        state,
+    }
+}
+
+const RESOLVE: i64 = 30 * DAY;
+
+#[test]
+fn a_mention_strength_ticket_never_closes_a_worktree() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![ticket(
+            Strength::Mention,
+            TicketStatus::Closed {
+                resolution: Some("Done".into()),
+            },
+        )],
+        vec![],
+    ));
+    let plan = classify_clean(
+        &snap,
+        &Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        },
+    );
+    for (_, decision) in &plan.entries {
+        assert!(
+            !matches!(decision.reason(), gw_core::Reason::TicketClosed { .. }),
+            "mention evidence produced a ticket-closed verdict: {decision:?}"
+        );
+    }
+}
+
+#[test]
+fn a_mention_strength_change_never_merges_a_worktree() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![],
+        vec![change(
+            Strength::Mention,
+            ChangeState::Merged { reference: None },
+        )],
+    ));
+    for (_, decision) in &classify_clean(&snap, &Policy::default()).entries {
+        assert_ne!(
+            decision.reason(),
+            &gw_core::Reason::MergedPr,
+            "mention evidence justified a merge: {decision:?}"
+        );
+    }
+}
+
+#[test]
+fn an_unknown_ticket_never_produces_a_ticket_closed_verdict() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![ticket(
+            Strength::Identity,
+            TicketStatus::Unknown {
+                detail: "tracker down".into(),
+            },
+        )],
+        vec![],
+    ));
+    for (_, decision) in &classify_clean(
+        &snap,
+        &Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        },
+    )
+    .entries
+    {
+        assert!(
+            !matches!(decision.reason(), gw_core::Reason::TicketClosed { .. }),
+            "unreadable ticket became closed: {decision:?}"
+        );
+    }
+}
+
+/// Two providers, one says merged and one cannot answer. The disagreement is
+/// not evidence, so the merge reason must not appear.
+#[test]
+fn a_contested_change_never_produces_a_merged_verdict() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![],
+        vec![
+            change(Strength::Identity, ChangeState::Merged { reference: None }),
+            change(
+                Strength::Identity,
+                ChangeState::Unknown {
+                    detail: "provider failed".into(),
+                },
+            ),
+        ],
+    ));
+    for (_, decision) in &classify_clean(&snap, &Policy::default()).entries {
+        assert_ne!(
+            decision.reason(),
+            &gw_core::Reason::MergedPr,
+            "a contested change justified removal: {decision:?}"
+        );
+    }
+}
+
+/// A closed ticket and an open change both appear; neither may be dropped in
+/// favour of the other.
+#[test]
+fn a_contested_ticket_never_produces_a_ticket_closed_verdict() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![
+            ticket(
+                Strength::Identity,
+                TicketStatus::Closed {
+                    resolution: Some("Done".into()),
+                },
+            ),
+            ticket(Strength::Identity, TicketStatus::Open),
+        ],
+        vec![],
+    ));
+    for (_, decision) in &classify_clean(
+        &snap,
+        &Policy {
+            clean_closed_tickets: true,
+            ..Policy::default()
+        },
+    )
+    .entries
+    {
+        assert!(
+            !matches!(decision.reason(), gw_core::Reason::TicketClosed { .. }),
+            "a contested ticket became closed: {decision:?}"
+        );
+    }
+}
+
+/// The removal that a strong, uncontested fact does authorize still happens.
+/// Without this the properties above could pass by never removing anything.
+#[test]
+fn an_uncontested_merged_change_still_removes() {
+    let snap = snapshot_with(clean_stale_worktree(
+        vec![],
+        vec![change(
+            Strength::Identity,
+            ChangeState::Merged { reference: None },
+        )],
+    ));
+    let plan = classify_clean(&snap, &Policy::default());
+    assert!(
+        plan.entries
+            .iter()
+            .any(|(_, d)| d.reason() == &gw_core::Reason::MergedPr),
+        "a clean, published, merged worktree was kept: {plan:?}"
+    );
+    assert!(plan.entries.iter().all(|(_, d)| match d {
+        Decision::Remove { .. } => true,
+        _ => d.reason() != &gw_core::Reason::Stale { age_secs: RESOLVE },
+    }));
 }

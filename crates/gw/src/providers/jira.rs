@@ -1,22 +1,11 @@
-use std::collections::HashMap;
 use std::process::{Command, Stdio};
 
-use gw_core::{TicketKey, TicketStatus};
+use gw_core::{ProviderId, TicketId, TicketObservation, TicketStatus};
 
 use crate::error::Error;
+use crate::providers::{Limits, TicketProvider};
 
-/// Ticket state for a set of keys.
-#[derive(Debug, Clone, Default)]
-pub struct TicketInfo {
-    pub status: HashMap<String, TicketStatus>,
-    pub summary: HashMap<String, String>,
-}
-
-pub trait JiraBackend {
-    fn lookup(&self, keys: &[TicketKey]) -> Result<TicketInfo, Error>;
-}
-
-/// JIRA Cloud REST adapter.
+/// A JIRA Cloud REST adapter.
 ///
 /// Transport is `curl`, which the shell implementation already required. That
 /// avoids linking a TLS stack into a tool whose only network call is one
@@ -24,6 +13,7 @@ pub trait JiraBackend {
 /// and fields fetched are all configuration; nothing about a specific tenant is
 /// compiled in.
 pub struct JiraRest {
+    id: ProviderId,
     base_url: String,
     user: String,
     token: String,
@@ -31,7 +21,7 @@ pub struct JiraRest {
 
 impl JiraRest {
     /// Build an adapter from the resolved settings, or `None` when JIRA is not
-    /// configured. Callers treat absence as "lookup disabled", never an error.
+    /// configured. Callers treat absence as "provider inactive", never an error.
     ///
     /// The base URL comes from `--jira-url`, `GW_JIRA_BASE_URL`, or `.gw.toml`.
     /// Credentials come from the environment only, so they are never written to
@@ -48,6 +38,7 @@ impl JiraRest {
             return None;
         }
         Some(Self {
+            id: ProviderId::parse("jira").expect("literal is a valid provider id"),
             base_url: base_url.trim_end_matches('/').to_string(),
             user,
             token,
@@ -116,17 +107,32 @@ impl JiraRest {
     }
 }
 
-impl JiraBackend for JiraRest {
-    fn lookup(&self, keys: &[TicketKey]) -> Result<TicketInfo, Error> {
-        let mut info = TicketInfo::default();
-        if keys.is_empty() {
-            return Ok(info);
+impl TicketProvider for JiraRest {
+    fn id(&self) -> &ProviderId {
+        &self.id
+    }
+
+    fn lookup(&self, ids: &[TicketId], limits: Limits) -> Result<Vec<TicketObservation>, Error> {
+        let mut observations = Vec::with_capacity(ids.len());
+        if ids.is_empty() {
+            return Ok(observations);
         }
 
+        // The batch may exceed the provider's request limit; ask in chunks so a
+        // large worktree directory cannot produce one oversized JQL request.
+        for chunk in ids.chunks(limits.max_queries.max(1)) {
+            observations.extend(self.lookup_chunk(chunk)?);
+        }
+        Ok(observations)
+    }
+}
+
+impl JiraRest {
+    fn lookup_chunk(&self, ids: &[TicketId]) -> Result<Vec<TicketObservation>, Error> {
         let jql = format!(
             "key in ({})",
-            keys.iter()
-                .map(gw_core::TicketKey::as_str)
+            ids.iter()
+                .map(TicketId::lookup_key)
                 .collect::<Vec<_>>()
                 .join(",")
         );
@@ -154,6 +160,7 @@ impl JiraBackend for JiraRest {
             });
         }
 
+        let mut found = std::collections::HashMap::new();
         for issue in parsed
             .get("issues")
             .and_then(|v| v.as_array())
@@ -164,40 +171,67 @@ impl JiraBackend for JiraRest {
                 continue;
             };
             let fields = issue.get("fields");
-            let done = fields
-                .and_then(|f| f.get("status"))
-                .and_then(|s| s.get("statusCategory"))
-                .and_then(|c| c.get("key"))
-                .and_then(|k| k.as_str())
-                == Some("done");
-            let status = if done {
+            let status = self.status_of(fields);
+            let summary = fields
+                .and_then(|f| f.get("summary"))
+                .and_then(|s| s.as_str())
+                .map(str::to_string);
+            if let Ok(id) = TicketId::parse(key) {
+                found.insert(id.clone(), (status, summary));
+            }
+        }
+
+        // Every identifier gets an answer. An identifier the tracker did not
+        // return is `Unknown`: the convention proved the branch names it, but
+        // no state could be observed, and silence is not "open" or "closed".
+        Ok(ids
+            .iter()
+            .map(|id| {
+                let (status, summary) = found.remove(id).unwrap_or_else(|| {
+                    (
+                        TicketStatus::Unknown {
+                            detail: "not returned by the tracker".into(),
+                        },
+                        None,
+                    )
+                });
+                TicketObservation {
+                    provider: self.id.clone(),
+                    id: id.clone(),
+                    strength: gw_core::Strength::Identity,
+                    status,
+                    summary,
+                }
+            })
+            .collect())
+    }
+
+    fn status_of(&self, fields: Option<&serde_json::Value>) -> TicketStatus {
+        let category = fields
+            .and_then(|f| f.get("status"))
+            .and_then(|s| s.get("statusCategory"))
+            .and_then(|c| c.get("key"))
+            .and_then(|k| k.as_str());
+        match category {
+            Some(category) if category.eq_ignore_ascii_case(&self.done_category()) => {
                 let resolution = fields
                     .and_then(|f| f.get("resolution"))
                     .and_then(|r| r.get("name"))
                     .and_then(|n| n.as_str())
                     .map(str::to_string);
                 TicketStatus::Closed { resolution }
-            } else {
-                TicketStatus::Open
-            };
-            info.status.insert(key.to_string(), status);
-            if let Some(summary) = fields
-                .and_then(|f| f.get("summary"))
-                .and_then(|s| s.as_str())
-            {
-                info.summary.insert(key.to_string(), summary.to_string());
             }
+            Some(_) => TicketStatus::Open,
+            // No status category is unreadable, not open: treating it as open
+            // would silently discard a "done" answer.
+            None => TicketStatus::Unknown {
+                detail: "response had no status category".into(),
+            },
         }
-        Ok(info)
     }
-}
 
-/// A backend for when JIRA is not configured.
-pub struct NoJira;
-
-impl JiraBackend for NoJira {
-    fn lookup(&self, _keys: &[TicketKey]) -> Result<TicketInfo, Error> {
-        Ok(TicketInfo::default())
+    fn done_category(&self) -> String {
+        "done".to_string()
     }
 }
 
@@ -261,9 +295,48 @@ mod tests {
         assert_eq!(escape_curl_config("a\\b"), "a\\\\b");
     }
 
+    fn adapter() -> JiraRest {
+        JiraRest {
+            id: ProviderId::parse("jira").unwrap(),
+            base_url: "https://example.atlassian.net".into(),
+            user: "u".into(),
+            token: "t".into(),
+        }
+    }
+
     #[test]
-    fn no_jira_backend_is_inert() {
-        let info = NoJira.lookup(&[]).unwrap();
-        assert!(info.status.is_empty());
+    fn done_category_is_closed_with_its_resolution() {
+        let fields = serde_json::json!({
+            "status": { "statusCategory": { "key": "done" } },
+            "resolution": { "name": "Fixed" }
+        });
+        assert_eq!(
+            adapter().status_of(Some(&fields)),
+            TicketStatus::Closed {
+                resolution: Some("Fixed".into())
+            }
+        );
+    }
+
+    #[test]
+    fn other_categories_are_open() {
+        let fields =
+            serde_json::json!({ "status": { "statusCategory": { "key": "indeterminate" } } });
+        assert_eq!(adapter().status_of(Some(&fields)), TicketStatus::Open);
+    }
+
+    #[test]
+    fn a_missing_category_is_unknown_not_open() {
+        let fields = serde_json::json!({ "summary": "no status" });
+        assert!(matches!(
+            adapter().status_of(Some(&fields)),
+            TicketStatus::Unknown { .. }
+        ));
+    }
+
+    #[test]
+    fn empty_lookup_is_inert() {
+        let observations = adapter().lookup(&[], Limits::default()).unwrap();
+        assert!(observations.is_empty());
     }
 }

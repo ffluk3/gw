@@ -64,7 +64,7 @@ pub fn verdict<'a>(
         Dirty::Unknown => return Verdict::StatusUnknown,
         Dirty::Clean => {}
     }
-    if wt.merged_pr {
+    if wt.has_merged_change() {
         return Verdict::Merged;
     }
     if wt.activity.source != ActivitySource::Unknown
@@ -74,7 +74,7 @@ pub fn verdict<'a>(
             age_secs: wt.activity.age_secs,
         };
     }
-    if let Some(resolution) = wt.ticket.closed_resolution() {
+    if let Some(resolution) = wt.closed_ticket_resolution() {
         return Verdict::TicketClosed { resolution };
     }
     Verdict::NoSignal

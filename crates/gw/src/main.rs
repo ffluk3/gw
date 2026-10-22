@@ -6,9 +6,8 @@ mod config;
 mod context;
 mod error;
 mod git;
-mod github;
-mod jira;
 mod output;
+mod providers;
 mod repos;
 mod settings;
 

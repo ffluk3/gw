@@ -10,4 +10,6 @@ and context. They are not step-by-step instructions.
 - [`gw clean` safety rules](clean-safety.md) — the order of the checks and why
   they fail closed.
 - [The decision model](decision-model.md) — verdicts, decisions, and plans.
+- [Conventions and providers](conventions.md) — what a branch name means, and
+  which systems `gw` asks.
 - [Architecture](architecture.md) — the pure core and the I/O shell.

@@ -113,7 +113,7 @@ impl BranchName {
     /// Extracts the first JIRA-shaped key (`[A-Z][A-Z0-9]+-[0-9]+`) from the
     /// branch name. Handles prefixed branches such as `feature/PROJ-123-thing`.
     #[must_use]
-    pub fn ticket_key(&self) -> Option<TicketKey> {
+    pub fn ticket_key(&self) -> Option<TicketId> {
         self.find_ticket(|_| true)
     }
 
@@ -123,7 +123,7 @@ impl BranchName {
     /// [`Self::ticket_key`]. Matching is case-insensitive because JIRA renders
     /// project keys in upper case but users type them in either case.
     #[must_use]
-    pub fn ticket_key_for(&self, projects: &[String]) -> Option<TicketKey> {
+    pub fn ticket_key_for(&self, projects: &[String]) -> Option<TicketId> {
         if projects.is_empty() {
             return self.ticket_key();
         }
@@ -136,7 +136,7 @@ impl BranchName {
     /// The shared scanner. `accept` decides whether a well-shaped candidate is
     /// the key we want; a rejected candidate is skipped without rescanning its
     /// interior, so `XPROJ-1` can never satisfy a filter for `PROJ`.
-    fn find_ticket(&self, accept: impl Fn(&str) -> bool) -> Option<TicketKey> {
+    fn find_ticket(&self, accept: impl Fn(&str) -> bool) -> Option<TicketId> {
         let bytes = self.0.as_bytes();
         let mut i = 0;
         while i < bytes.len() {
@@ -159,7 +159,7 @@ impl BranchName {
                 if k > digit_start {
                     let candidate = &self.0[start..k];
                     if accept(candidate) {
-                        return Some(TicketKey(candidate.to_string()));
+                        return Some(TicketId(candidate.to_string()));
                     }
                     i = k.max(i + 1);
                     continue;
@@ -177,19 +177,46 @@ impl fmt::Display for BranchName {
     }
 }
 
-/// A JIRA issue key such as `PROJ-47383`.
+/// A ticket identifier in whatever shape the convention produces, such as a
+/// JIRA key `PROJ-47383` or a Linear identifier `ENG-42`.
+///
+/// The type deliberately does not validate the shape: a convention decides
+/// what an identifier looks like, and a provider decides what it means. It only
+/// guarantees that whatever reached it came from a matched rule.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(transparent)]
-pub struct TicketKey(String);
+pub struct TicketId(String);
 
-impl TicketKey {
+impl TicketId {
+    pub fn parse(raw: &str) -> Result<Self, ModelError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(ModelError("ticket id is empty"));
+        }
+        if trimmed.len() > 128 {
+            return Err(ModelError("ticket id is implausibly long"));
+        }
+        if trimmed.chars().any(|c| c.is_control() || c.is_whitespace()) {
+            return Err(ModelError(
+                "ticket id contains whitespace or control characters",
+            ));
+        }
+        Ok(Self(trimmed.to_string()))
+    }
+
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// The provider-scoped lookup key: the value itself.
+    #[must_use]
+    pub fn lookup_key(&self) -> &str {
+        &self.0
+    }
 }
 
-impl fmt::Display for TicketKey {
+impl fmt::Display for TicketId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
@@ -247,7 +274,7 @@ mod tests {
         for (input, expected) in cases {
             let got = BranchName::parse(input).unwrap().ticket_key();
             assert_eq!(
-                got.as_ref().map(super::TicketKey::as_str),
+                got.as_ref().map(super::TicketId::as_str),
                 expected,
                 "input={input}"
             );
@@ -259,12 +286,12 @@ mod tests {
         let branch = BranchName::parse("feature/OTHER-7-PROJ-123").unwrap();
         let proj = vec!["PROJ".to_string()];
         assert_eq!(
-            branch.ticket_key_for(&proj).as_ref().map(TicketKey::as_str),
+            branch.ticket_key_for(&proj).as_ref().map(TicketId::as_str),
             Some("PROJ-123")
         );
         // Empty means unrestricted, preserving the no-config behavior.
         assert_eq!(
-            branch.ticket_key_for(&[]).as_ref().map(TicketKey::as_str),
+            branch.ticket_key_for(&[]).as_ref().map(TicketId::as_str),
             Some("OTHER-7")
         );
     }

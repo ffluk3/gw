@@ -3,17 +3,22 @@ use std::path::Path;
 use serde::Deserialize;
 
 use crate::error::Error;
+use gw_core::ProviderId;
 
 /// Per-layout settings, resolved from `.gw.toml` and the command line.
 ///
 /// Only values that are safe to commit belong here. Credentials stay in the
-/// environment (see `jira::JiraRest`), never in a file the layout may share.
+/// environment (see `providers::jira`), never in a file the layout may share.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Settings {
     /// JIRA project keys a branch name may reference. Empty means any key.
     pub jira_projects: Vec<String>,
     /// JIRA base URL, when one is configured.
     pub jira_base_url: Option<String>,
+    /// Providers the caller asked to skip for this run.
+    pub skip_providers: Vec<ProviderId>,
+    /// `--skip-github`, which is the pre-provider spelling of the same idea.
+    pub skip_github: bool,
 }
 
 impl Settings {
@@ -42,7 +47,17 @@ impl Settings {
                 .map(str::to_string)
                 .or(jira.base_url)
                 .filter(|s| !s.trim().is_empty()),
+            skip_providers: Vec::new(),
+            skip_github: false,
         })
+    }
+
+    /// Record the providers this invocation was asked to skip.
+    #[must_use]
+    pub fn with_skips(mut self, providers: Vec<ProviderId>, skip_github: bool) -> Self {
+        self.skip_providers = providers;
+        self.skip_github = skip_github;
+        self
     }
 }
 

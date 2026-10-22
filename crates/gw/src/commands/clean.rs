@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::io::IsTerminal;
 
 use gw_core::render::table::render_table;
@@ -8,13 +7,12 @@ use gw_core::{
 };
 
 use crate::cli::CleanArgs;
-use crate::config::{now_epoch, repo_slug};
+use crate::config::now_epoch;
 use crate::context::Context;
 use crate::error::Error;
 use crate::git::GitBackend;
-use crate::github::{GhCli, GithubBackend, NoGithub};
-use crate::jira::{JiraBackend, JiraRest};
 use crate::output::Outcome;
+use crate::providers::Limits;
 
 use super::snapshot;
 
@@ -40,15 +38,38 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
 
     let mut snap = snapshot::load(ctx, now)?;
 
-    let merged = if args.skip_github {
-        HashSet::new()
-    } else {
-        attach_github(ctx, &mut snap)?
-    };
-    snapshot::attach_merged(&mut snap, &merged);
+    let registry = ctx.registry();
+    let limits = Limits::default();
 
-    if !args.no_jira {
-        attach_jira(ctx, &mut snap);
+    // Merged changes.
+    let queries = snapshot::change_queries(&snap, &ctx.convention);
+    if !queries.is_empty() {
+        match snapshot::repo_slug_for(ctx) {
+            Some(slug) => {
+                let progress = format!(
+                    "🔄 Checking {} for {} merged change(s)...",
+                    queries.first().map_or("provider", |q| q.provider.as_str()),
+                    queries.len()
+                );
+                if ctx.is_json() {
+                    eprintln!("{progress}");
+                } else {
+                    println!("{progress}");
+                }
+                let observed = snapshot::observe_changes(registry, &slug, &queries, limits);
+                snapshot::attach_changes(&mut snap, &ctx.convention, &observed);
+            }
+            None => {
+                eprintln!("warning: origin is not a supported code host; skipping change lookup");
+            }
+        }
+    }
+
+    // Tickets.
+    let refs = snapshot::ticket_refs(&snap, &ctx.convention);
+    if !refs.is_empty() {
+        let observations = snapshot::observe_tickets(registry, &refs, limits);
+        snapshot::attach_tickets(&mut snap, &ctx.convention, &observations);
     }
 
     let plan = classify_clean(&snap, &policy);
@@ -121,61 +142,6 @@ fn should_apply(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
     }
     // Interactive: yes. Piped or scripted: plan only.
     std::io::stdout().is_terminal()
-}
-
-fn attach_github(
-    ctx: &Context,
-    snap: &mut gw_core::RepoSnapshot,
-) -> Result<HashSet<String>, Error> {
-    let remote = ctx.git.remote_url()?.unwrap_or_default();
-    let Some(slug) = repo_slug(&remote) else {
-        eprintln!("warning: origin is not a GitHub remote; skipping merged-PR lookup");
-        return Ok(HashSet::new());
-    };
-    let candidates = snapshot::pr_candidates(snap);
-    if candidates.is_empty() {
-        return Ok(HashSet::new());
-    }
-    let progress = format!(
-        "🔄 Checking GitHub for {} merged PR(s)...",
-        candidates.len()
-    );
-    if ctx.is_json() {
-        eprintln!("{progress}");
-    } else {
-        println!("{progress}");
-    }
-
-    let backend: Box<dyn GithubBackend> = if std::env::var_os("GW_SKIP_GITHUB").is_some() {
-        Box::new(NoGithub)
-    } else {
-        Box::new(GhCli)
-    };
-    // A lookup failure must not silently reduce cleaning to stale-only; say so
-    // and continue with what we can still prove.
-    match backend.merged_prs(&slug, &candidates) {
-        Ok(merged) => Ok(merged),
-        Err(e) => {
-            eprintln!("warning: {e}");
-            eprintln!("         continuing without merged-PR information");
-            Ok(HashSet::new())
-        }
-    }
-}
-
-fn attach_jira(ctx: &Context, snap: &mut gw_core::RepoSnapshot) {
-    let Some(jira) = JiraRest::from_settings(&ctx.settings) else {
-        return;
-    };
-    let keys = snapshot::ticket_keys(snap, &ctx.settings.jira_projects);
-    if keys.is_empty() {
-        return;
-    }
-    let backend: Box<dyn JiraBackend> = Box::new(jira);
-    match backend.lookup(&keys) {
-        Ok(info) => snapshot::attach_tickets(snap, &info, &ctx.settings.jira_projects),
-        Err(e) => eprintln!("warning: {e}"),
-    }
 }
 
 fn print_recommendations(plan: &Plan) {
@@ -304,7 +270,6 @@ mod tests {
             yes,
             closed: false,
             delete_branches: false,
-            skip_github: false,
             no_jira: false,
             stale_days: 7,
         }

@@ -66,6 +66,25 @@ pub struct Cli {
     )]
     pub jira_url: Option<String>,
 
+    /// Do not query this provider. Repeatable. Providers are named in
+    /// `.gw.toml` rules; the built-in ones are `jira` and `github`.
+    #[arg(
+        long = "skip-provider",
+        global = true,
+        env = "GW_SKIP_PROVIDERS",
+        value_delimiter = ',',
+        value_name = "ID"
+    )]
+    pub skip_provider: Vec<String>,
+
+    /// Skip the code-host change lookup. Same as `--skip-provider github`.
+    ///
+    /// `GW_SKIP_GITHUB` is read as a presence flag, so `GW_SKIP_GITHUB=1` and
+    /// `GW_SKIP_GITHUB=0` both mean "skip" — matching how the variable behaved
+    /// before this flag existed.
+    #[arg(long, global = true)]
+    pub skip_github: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -171,10 +190,6 @@ pub struct CleanArgs {
     /// Also delete stale orphan local branches whose commits are all published.
     #[arg(long)]
     pub delete_branches: bool,
-
-    /// Skip the GitHub merged-PR lookup.
-    #[arg(long)]
-    pub skip_github: bool,
 
     /// Skip the JIRA lookup.
     #[arg(long)]

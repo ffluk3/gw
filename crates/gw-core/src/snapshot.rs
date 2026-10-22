@@ -3,8 +3,9 @@ use std::path::PathBuf;
 
 use serde::Serialize;
 
+use crate::convention::{ProviderId, Strength};
 use crate::layout::Layout;
-use crate::model::{BranchName, Sha, TicketKey};
+use crate::model::{BranchName, Sha, TicketId};
 
 /// The working-tree cleanliness of a checkout.
 ///
@@ -85,16 +86,24 @@ impl Activity {
     }
 }
 
-/// JIRA state for the ticket a branch refers to.
+/// Tracker state for a ticket.
+///
+/// `NotChecked` covers both "the branch has no ticket" and "lookups are
+/// disabled". `Unknown` is distinct: a lookup ran and its answer could not be
+/// trusted. The classifier treats the two the same way (neither closes a
+/// ticket), but JSON distinguishes them so a caller can tell "not configured"
+/// from "the tracker failed".
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum TicketStatus {
-    /// No ticket key in the branch name, or JIRA lookup disabled.
+    /// No ticket key in the branch name, or lookups are disabled.
     NotChecked,
     /// Ticket is not in a done status category.
     Open,
     /// Ticket is done, with its resolution if one is set.
     Closed { resolution: Option<String> },
+    /// A lookup ran and did not produce a trustworthy answer.
+    Unknown { detail: String },
 }
 
 impl TicketStatus {
@@ -107,6 +116,51 @@ impl TicketStatus {
             _ => None,
         }
     }
+
+    /// Whether this observation is trustworthy enough to inform a decision.
+    #[must_use]
+    pub fn is_known(&self) -> bool {
+        !matches!(self, TicketStatus::Unknown { .. })
+    }
+}
+
+/// One ticket observation, tagged with the provider that produced it and how
+/// strongly the convention associated it with the branch.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TicketObservation {
+    pub provider: ProviderId,
+    pub id: TicketId,
+    pub strength: Strength,
+    pub status: TicketStatus,
+    pub summary: Option<String>,
+}
+
+/// What a code host reports about a change.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case", tag = "state")]
+pub enum ChangeState {
+    /// A change was found and merged.
+    Merged { reference: Option<String> },
+    /// A change exists but is not merged.
+    Open { reference: Option<String> },
+    /// The provider failed or could not answer.
+    Unknown { detail: String },
+}
+
+impl ChangeState {
+    #[must_use]
+    pub fn is_known(&self) -> bool {
+        !matches!(self, ChangeState::Unknown { .. })
+    }
+}
+
+/// One change observation, tied back to the query that produced it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ChangeObservation {
+    pub provider: ProviderId,
+    pub strength: Strength,
+    pub selector: String,
+    pub state: ChangeState,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -118,9 +172,10 @@ pub struct WorktreeSnapshot {
     pub kind: WorktreeKind,
     pub dirty: Dirty,
     pub activity: Activity,
-    pub ticket: TicketStatus,
-    /// Whether GitHub reports a merged PR for this branch.
-    pub merged_pr: bool,
+    /// Every ticket the convention associated with this branch.
+    pub tickets: Vec<TicketObservation>,
+    /// Every change lookup the convention asked for and its answer.
+    pub changes: Vec<ChangeObservation>,
 }
 
 impl WorktreeSnapshot {
@@ -129,6 +184,59 @@ impl WorktreeSnapshot {
     #[must_use]
     pub fn status_observed(&self) -> bool {
         self.dirty != Dirty::Unknown
+    }
+
+    /// The first identity-strength ticket observation.
+    #[must_use]
+    pub fn primary_ticket(&self) -> Option<&TicketObservation> {
+        self.tickets.iter().find(|t| t.strength.is_identity())
+    }
+
+    /// The first identity-strength ticket observation whose state is known.
+    #[must_use]
+    pub fn primary_known_ticket(&self) -> Option<&TicketObservation> {
+        self.tickets
+            .iter()
+            .find(|t| t.strength.is_identity() && t.status.is_known())
+    }
+
+    /// Whether a closed ticket may justify removal.
+    ///
+    /// Returns the resolution only when every identity-strength ticket
+    /// observation is known *and* at least one is closed. A contested or
+    /// unreadable answer yields `None`: ambiguity is not evidence, so the
+    /// worktree falls through to weaker reasons rather than being removed on a
+    /// fact the provider could not confirm.
+    #[must_use]
+    pub fn closed_ticket_resolution(&self) -> Option<&str> {
+        let identity: Vec<&TicketObservation> = self
+            .tickets
+            .iter()
+            .filter(|t| t.strength.is_identity())
+            .collect();
+        if identity.is_empty() || identity.iter().any(|t| !t.status.is_known()) {
+            return None;
+        }
+        identity.iter().find_map(|t| t.status.closed_resolution())
+    }
+
+    /// Whether a merged change may justify removal.
+    ///
+    /// The same contested-fact rule as [`Self::closed_ticket_resolution`]:
+    /// merge evidence counts only when every identity-strength change
+    /// observation is known.
+    #[must_use]
+    pub fn has_merged_change(&self) -> bool {
+        let identity: Vec<&ChangeObservation> = self
+            .changes
+            .iter()
+            .filter(|c| c.strength.is_identity())
+            .collect();
+        !identity.is_empty()
+            && identity.iter().all(|c| c.state.is_known())
+            && identity
+                .iter()
+                .any(|c| matches!(c.state, ChangeState::Merged { .. }))
     }
 }
 
@@ -210,9 +318,21 @@ impl RepoSnapshot {
         self.default_branch.as_ref() == Some(branch) || self.head_branch.as_ref() == Some(branch)
     }
 
+    /// The ticket a branch resolves to under the given convention.
+    ///
+    /// The convention is passed in rather than stored on the snapshot: the
+    /// snapshot is a record of facts, and how a branch maps to a ticket is
+    /// configuration, not an observation.
     #[must_use]
-    pub fn ticket_for(&self, branch: &BranchName) -> Option<TicketKey> {
-        branch.ticket_key()
+    pub fn ticket_for(
+        &self,
+        branch: &BranchName,
+        convention: &crate::convention::Convention,
+    ) -> Option<TicketId> {
+        convention
+            .resolve(branch.as_str())
+            .primary_ticket()
+            .map(|t| t.id.clone())
     }
 }
 

@@ -55,6 +55,7 @@ nav:
       - Why a worktree layout: explanation/why-worktree-layout.md
       - Layout and discovery: explanation/layout.md
       - Clean safety rules: explanation/clean-safety.md
+      - Conventions and providers: explanation/conventions.md
       - Decision model: explanation/decision-model.md
       - Architecture: explanation/architecture.md
 

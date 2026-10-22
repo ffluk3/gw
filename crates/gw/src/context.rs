@@ -1,18 +1,22 @@
 use std::path::PathBuf;
 
-use gw_core::Layout;
+use gw_core::{Convention, Layout, ProviderId};
 
 use crate::cli::Cli;
 use crate::config::resolve_layout;
 use crate::error::Error;
 use crate::git::{CliGit, GitBackend};
+use crate::providers::Registry;
 use crate::settings::Settings;
 
 /// Everything a command needs, wired once.
 pub struct Context {
     pub layout: Layout,
     pub git: CliGit,
-    pub settings: Settings,
+    /// The convention in force: what a branch name means.
+    pub convention: Convention,
+    /// The providers available for this run.
+    registry: Registry,
     pub json: bool,
 }
 
@@ -40,14 +44,25 @@ impl Context {
             }
         }
 
-        let settings = Settings::load(&layout.root, &cli.jira_project, cli.jira_url.as_deref())?;
+        let settings = Settings::load(&layout.root, &cli.jira_project, cli.jira_url.as_deref())?
+            .with_skips(skip_providers(cli), skip_github(cli));
+
+        let convention = convention_for(&settings);
+        let registry = Registry::build(&settings);
 
         Ok(Self {
             git,
             layout,
-            settings,
+            convention,
+            registry,
             json: cli.json,
         })
+    }
+
+    /// The providers available for this run.
+    #[must_use]
+    pub fn registry(&self) -> &Registry {
+        &self.registry
     }
 
     /// Whether output should be machine-readable.
@@ -56,6 +71,53 @@ impl Context {
     pub fn is_json(&self) -> bool {
         self.json
     }
+}
+
+/// Whether the code-host lookup was disabled for this run.
+///
+/// `GW_SKIP_GITHUB` historically means "set to anything"; `--skip-github`
+/// means the same. Both collapse into one flag here so the registry has a
+/// single rule to follow.
+fn skip_github(cli: &Cli) -> bool {
+    cli.skip_github || std::env::var_os("GW_SKIP_GITHUB").is_some()
+}
+
+/// The convention for this run.
+///
+/// The built-in convention is the default. Configuration narrows it: a layout
+/// that declares JIRA projects restricts which branch prefixes count as
+/// tickets, which is the pre-convention `[jira] project` behavior expressed as
+/// a convention rule.
+fn convention_for(settings: &Settings) -> Convention {
+    let mut convention = Convention::built_in();
+    if !settings.jira_projects.is_empty() {
+        convention.ticket_rules = convention
+            .ticket_rules
+            .into_iter()
+            .map(|rule| match rule.selector {
+                gw_core::TicketSelector::Embedded { pattern, .. } => gw_core::TicketRule {
+                    selector: gw_core::TicketSelector::Embedded {
+                        pattern,
+                        allow_projects: settings.jira_projects.clone(),
+                    },
+                    ..rule
+                },
+                other => gw_core::TicketRule {
+                    selector: other,
+                    ..rule
+                },
+            })
+            .collect();
+    }
+    convention
+}
+
+/// Providers named by `--skip-provider`, rejecting invalid slugs.
+fn skip_providers(cli: &Cli) -> Vec<ProviderId> {
+    cli.skip_provider
+        .iter()
+        .filter_map(|raw| ProviderId::parse(raw).ok())
+        .collect()
 }
 
 /// Infer the worktrees directory from the worktrees git actually reports.
