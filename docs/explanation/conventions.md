@@ -37,12 +37,69 @@ With no configuration, `gw` uses this convention:
 | change | A pull request whose head branch has the same name as the branch |
 
 This is the 1:1:1 mapping earlier versions compiled in: one branch, one ticket,
-one pull request. It stays the default because it is a sane starting point, not
-because it is required.
+one pull request.
 
 The `allow_projects` field on that rule narrows it to a set of project
 prefixes. That is why a layout can say "only `PROJ` keys count" without
 changing anything else.
+
+## Why the default is one branch to one ticket
+
+The 1:1:1 mapping is not the only convention `gw` can express; the recipes
+below show how to replace it. It is the default because it is the shape that
+makes a worktree directory predictable for two different consumers.
+
+**An agent that fans out.** A coordinating agent reads a list of tickets,
+provisions one worktree for each, and hands a worker agent the path. The
+mapping has to be a total function: any ticket key produces exactly one
+directory, the same one on every run, with no coordination between workers.
+`gw add --print-path PROJ-1234` is that function. Two workers cannot collide,
+because a second request for the same ticket reuses the worktree instead of
+creating a second checkout.
+
+**An engineer with several tickets open.** The directory name tells you which
+ticket a checkout belongs to, so you change tasks by changing directory rather
+than by stashing. The same property means the layout itself shows what you have
+in flight, without a separate list.
+
+### What the constraint buys at cleanup time
+
+Keeping the mapping tight is what makes the size of the worktree directory
+manageable, because it ties cleanup to the one signal that covers work that
+never became a pull request.
+
+After the checks that protect unpublished commits and uncommitted changes,
+`gw clean` can remove a worktree for three reasons:
+
+- **Merged change.** A pull request was merged. This misses branches that were
+  abandoned before anyone opened a PR.
+- **Stale.** The last commit is older than `--stale-days` (7 by default). This
+  is a proxy for "abandoned", and it is wrong in both directions: it keeps dead
+  work that was touched recently, and it removes live work that is waiting on
+  review.
+- **Closed ticket.** The ticket is resolved. This is the precise signal. The
+  work is done or dropped, whether or not it ever reached a pull request.
+
+Only the third one bounds the directory against something you actually track.
+That is the argument for the constraint: a branch per ticket, and a ticket
+state to measure it by.
+
+Closed-ticket removal is off by default. `gw clean` reports the worktrees it
+would remove with `--closed` and removes nothing until you pass the flag. See
+[the order of the checks](clean-safety.md).
+
+### Where the claim stops
+
+The default is a recommendation, not an invariant.
+
+- The convention is configuration. A layout can drop ticket rules entirely
+  (`ticket_rules = []`), and the [recipes](../how-to/convention-recipes.md)
+  show a tracker with no ticket concept. What is lost is the closed-ticket
+  reason; merged-change and staleness cleanup still work.
+- A closed ticket is the last reason to destroy anything. Unpublished commits,
+  an uncommitted change, an unreadable status, and a contested provider answer
+  all come first. Closing a ticket does not remove a worktree that still holds
+  work.
 
 ## Evidence strength
 
