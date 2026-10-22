@@ -24,7 +24,7 @@ struct RepoRow {
 }
 
 pub fn run(args: &ReposArgs, json: bool) -> Result<Outcome, Error> {
-    let root = repos::repos_root();
+    let root = repos::repos_root()?;
     let mut rows = Vec::new();
 
     for (slug, path) in repos::discover(&root) {

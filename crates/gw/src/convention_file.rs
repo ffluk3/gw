@@ -85,8 +85,40 @@ pub struct Loaded {
     pub ticket_rules_origin: Origin,
     pub change_rules_origin: Origin,
     pub providers: Vec<ProviderConfig>,
+    /// The resolved clean policy, with the file it came from.
+    pub clean: CleanSettings,
+    /// The resolved discovery settings, with the file they came from.
+    pub discovery: DiscoverySettings,
+    /// The resolved provider-selection settings, with the file they came from.
+    pub provider_selection: ProviderSelection,
     /// Files that were read, in merge order.
     pub sources: Vec<PathBuf>,
+}
+
+/// `[clean]`, resolved.
+#[derive(Debug, Clone, Default)]
+pub struct CleanSettings {
+    /// Stale limit in seconds. `None` means no file set one.
+    pub stale_after_secs: Option<i64>,
+    pub stale_after_origin: Origin,
+    /// Branches the file adds to the protected set.
+    pub protect: Vec<String>,
+    pub protect_origin: Origin,
+}
+
+/// `[discovery]`, resolved.
+#[derive(Debug, Clone, Default)]
+pub struct DiscoverySettings {
+    pub repos_root: Option<String>,
+    pub repos_root_origin: Origin,
+}
+
+/// `[providers]`, resolved.
+#[derive(Debug, Clone, Default)]
+pub struct ProviderSelection {
+    /// Provider ids the file asks to skip.
+    pub skip: Vec<String>,
+    pub skip_origin: Origin,
 }
 
 /// Load one file, with no global layer and no inheritance.
@@ -135,6 +167,12 @@ pub fn load(layout_root: &Path) -> Result<Loaded, Error> {
 }
 
 fn apply(loaded: &mut Loaded, file: File, origin: Origin) -> Result<(), Error> {
+    // Each table is independent. A file that sets only `[clean]` must not be
+    // discarded because it has no `[convention]`.
+    apply_clean(loaded, file.clean, origin)?;
+    apply_discovery(loaded, file.discovery, origin)?;
+    apply_provider_selection(loaded, file.providers, origin);
+
     let Some(convention) = file.convention else {
         return Ok(());
     };
@@ -167,6 +205,93 @@ fn apply(loaded: &mut Loaded, file: File, origin: Origin) -> Result<(), Error> {
     Ok(())
 }
 
+fn apply_clean(
+    loaded: &mut Loaded,
+    table: Option<CleanTable>,
+    origin: Origin,
+) -> Result<(), Error> {
+    let Some(table) = table else {
+        return Ok(());
+    };
+
+    if let Some(text) = table.stale_after {
+        // Validate at load time. A duration that silently fell back to the
+        // default would make `gw clean` destroy the wrong set of worktrees,
+        // which is exactly the mistake a config file must not hide.
+        let seconds = gw_core::parse_duration_secs(&text)
+            .map_err(|e| Error::Usage(format!("invalid [clean] stale_after '{text}': {e}")))?;
+        loaded.clean.stale_after_secs = Some(seconds);
+        loaded.clean.stale_after_origin = origin;
+    }
+
+    if let Some(protect) = table.protect {
+        for raw in &protect {
+            gw_core::BranchName::parse(raw.trim()).map_err(|e| {
+                Error::Usage(format!("invalid [clean] protect branch '{raw}': {e}"))
+            })?;
+        }
+        loaded.clean.protect = protect
+            .into_iter()
+            .map(|raw| raw.trim().to_string())
+            .collect();
+        loaded.clean.protect_origin = origin;
+    }
+
+    Ok(())
+}
+
+fn apply_discovery(
+    loaded: &mut Loaded,
+    table: Option<DiscoveryTable>,
+    origin: Origin,
+) -> Result<(), Error> {
+    let Some(table) = table else {
+        return Ok(());
+    };
+    if table.repos_root.is_some() && origin == Origin::Layout {
+        // The repos root is what `gw` searches to *find* a layout. A layout
+        // file can only be read after its layout has been found, so a value
+        // there could never take effect. Say so rather than accept a setting
+        // that quietly does nothing.
+        return Err(Error::Usage(
+            "[discovery] repos_root belongs in the global file (~/.gw.toml), not in a \
+             layout's .gw.toml: gw searches the repos root to find layouts, so a value \
+             inside one could never take effect."
+                .to_string(),
+        ));
+    }
+    if let Some(root) = table.repos_root {
+        loaded.discovery.repos_root = Some(root);
+        loaded.discovery.repos_root_origin = origin;
+    }
+    Ok(())
+}
+
+/// The repos root declared by the global configuration file, if any.
+///
+/// `gw repos` and `gw init` run without a layout, so they cannot use a layout
+/// file. This reads only the global layer, which is the only one that can
+/// answer "where do layouts live?".
+pub fn load_global_discovery() -> Result<Option<String>, Error> {
+    let Some(path) = explicit_or_global_path() else {
+        return Ok(None);
+    };
+    let Some(file) = File::load(&path)? else {
+        return Ok(None);
+    };
+    Ok(file.discovery.and_then(|table| table.repos_root))
+}
+
+fn apply_provider_selection(loaded: &mut Loaded, table: Option<ProvidersTable>, origin: Origin) {
+    let Some(table) = table else {
+        return;
+    };
+    if let Some(skip) = table.skip {
+        loaded.provider_selection.skip = skip;
+        loaded.provider_selection.skip_origin = origin;
+    }
+}
+
 /// `GW_CONFIG` when set, otherwise `$HOME/.gw.toml` unless suppressed.
 fn explicit_or_global_path() -> Option<PathBuf> {
     if let Some(path) = std::env::var_os(CONFIG_ENV) {
@@ -183,6 +308,43 @@ fn explicit_or_global_path() -> Option<PathBuf> {
 struct File {
     #[serde(default)]
     convention: Option<ConventionTable>,
+    /// Thresholds and opt-ins for `gw clean`.
+    #[serde(default)]
+    clean: Option<CleanTable>,
+    /// Where layouts live, and how they are found.
+    #[serde(default)]
+    discovery: Option<DiscoveryTable>,
+    /// Which providers to leave out of a run.
+    #[serde(default)]
+    providers: Option<ProvidersTable>,
+}
+
+/// `[clean]` — the policy `gw clean` applies.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CleanTable {
+    /// Human-written duration such as `"5w"`. Validated at load time.
+    #[serde(default)]
+    stale_after: Option<String>,
+    /// Branches protected from deletion, in addition to the built-in set.
+    #[serde(default)]
+    protect: Option<Vec<String>>,
+}
+
+/// `[discovery]`
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DiscoveryTable {
+    #[serde(default)]
+    repos_root: Option<String>,
+}
+
+/// `[providers]`
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ProvidersTable {
+    #[serde(default)]
+    skip: Option<Vec<String>>,
 }
 
 impl File {
@@ -228,6 +390,19 @@ fn hint(error: &toml::de::Error) -> &'static str {
     }
     if text.contains("unknown field `provider`") {
         return "\n  A rule needs provider and selector. See docs/reference/configuration.md.\n";
+    }
+    if text.contains("unknown field `stale_days`")
+        || text.contains("unknown field `stale_after`")
+        || text.contains("unknown field `protect`")
+    {
+        return "\n  Worktree and branch cleanup settings live under [clean].\n  \
+                See docs/reference/configuration.md.\n";
+    }
+    if text.contains("unknown field `stale-after`") {
+        return "\n  Use underscore spelling: [clean] stale_after = \"7d\".\n";
+    }
+    if text.contains("unknown field `skip`") {
+        return "\n  Provider selection lives under [providers], not [convention.providers].\n";
     }
     ""
 }
@@ -517,7 +692,15 @@ mod coverage_tests {
             convention: Convention::built_in(),
             ..Loaded::default()
         };
-        apply(&mut loaded, File { convention: None }, Origin::Layout).unwrap();
+        apply(
+            &mut loaded,
+            File {
+                convention: None,
+                ..File::default()
+            },
+            Origin::Layout,
+        )
+        .unwrap();
         assert_eq!(
             loaded.convention.ticket_rules.len(),
             1,

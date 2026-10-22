@@ -73,7 +73,8 @@ After the checks that protect unpublished commits and uncommitted changes,
 
 - **Merged change.** A pull request was merged. This misses branches that were
   abandoned before anyone opened a PR.
-- **Stale.** The last commit is older than `--stale-days` (7 by default). This
+- **Stale.** The last commit is older than the stale limit: `--stale-days` or
+  `GW_STALE_DAYS`, then `[clean] stale_after`, then 7 days. This
   is a proxy for "abandoned", and it is wrong in both directions: it keeps dead
   work that was touched recently, and it removes live work that is waiting on
   review.

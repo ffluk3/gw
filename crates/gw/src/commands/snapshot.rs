@@ -98,12 +98,24 @@ fn protected_set(
             protected.insert(branch.clone());
         }
     }
-    for extra in std::env::var("GW_PROTECT")
-        .unwrap_or_default()
-        .split(',')
-        .filter(|s| !s.trim().is_empty())
+    // `[clean] protect` from the files, then `GW_PROTECT`. Both are additive:
+    // protection only ever grows, so a name that one source already listed is
+    // still protected and no source can remove another's protection.
+    for extra in ctx
+        .loaded
+        .clean
+        .protect
+        .iter()
+        .map(String::as_str)
+        .chain(
+            std::env::var("GW_PROTECT")
+                .unwrap_or_default()
+                .split(',')
+                .map(str::trim),
+        )
+        .filter(|s| !s.is_empty())
     {
-        if let Ok(name) = BranchName::parse(extra.trim()) {
+        if let Ok(name) = BranchName::parse(extra) {
             protected.insert(name);
         }
     }

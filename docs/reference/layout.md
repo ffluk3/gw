@@ -33,7 +33,12 @@ that contains at least one linked worktree.
 ```
 
 `gw` discovers both nested (`owner/name`) and flat (`name`) layouts. The repos
-root is `GW_REPOS_ROOT`, or `~/repos` when the variable is not set.
+root is `GW_REPOS_ROOT`, then `[discovery] repos_root` in `~/.gw.toml`, then
+`~/repos`.
+
+The global file is the only file that can set it. The repos root is how `gw`
+finds a layout, so it must be known before a layout's own `.gw.toml` can be
+read. A `[discovery] repos_root` in a layout file is a usage error.
 
 ## How `gw` recognizes a layout
 

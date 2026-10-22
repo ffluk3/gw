@@ -13,7 +13,7 @@ use crate::output::Outcome;
 pub fn run(args: InitArgs, json: bool) -> Result<Outcome, Error> {
     let root = match args.dir {
         Some(dir) => dir,
-        None => default_root(&args.remote, &crate::repos::repos_root())?,
+        None => default_root(&args.remote, &crate::repos::repos_root()?)?,
     };
     let root = absolute(&root)?;
 

@@ -8,6 +8,7 @@
 pub mod classify;
 pub mod convention;
 pub mod decision;
+pub mod duration;
 pub mod layout;
 pub mod model;
 pub mod policy;
@@ -19,6 +20,7 @@ pub use convention::{
     TicketRef, TicketRule, TicketSelector,
 };
 pub use decision::{Counts, Decision, Plan, Reason, Target};
+pub use duration::{format_duration_secs, parse_duration_secs};
 pub use layout::Layout;
 pub use model::{BranchName, ModelError, Sha, TicketId};
 pub use policy::Policy;

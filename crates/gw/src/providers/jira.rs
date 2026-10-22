@@ -26,16 +26,19 @@ impl JiraRest {
     /// error.
     ///
     /// The base URL comes from `[convention.providers.jira] base_url`, in
-    /// either configuration file. Credentials come from the environment only,
-    /// so they are never written to a file that might be committed.
-    /// Build an adapter from the merged configuration.
-    ///
-    /// The files win over `Settings`: a `[convention.providers.jira]` table is
-    /// the newer and more precise spelling, and `Settings` carries the legacy
-    /// `[jira]` values plus the CLI overrides.
+    /// either configuration file, or from `GW_JIRA_BASE_URL` when the file
+    /// does not set one. Credentials come from the environment only, so they
+    /// are never written to a file that might be committed.
     pub fn from_config(loaded: &crate::convention_file::Loaded) -> Option<Self> {
         let provider = loaded.providers.iter().find(|p| p.id.as_str() == "jira");
-        let base_url = provider.and_then(|p| p.base_url.clone())?;
+        // A `jira` entry must exist for the environment fallback to apply.
+        // Otherwise an unrelated `GW_JIRA_BASE_URL` in someone's profile would
+        // switch on a provider this layout deliberately left out.
+        provider?;
+        let base_url = provider
+            .and_then(|p| p.base_url.clone())
+            .or_else(|| std::env::var("GW_JIRA_BASE_URL").ok())
+            .filter(|value| !value.trim().is_empty())?;
         let user = std::env::var("GW_JIRA_USER").ok()?;
         let token = std::env::var("GW_JIRA_API_TOKEN").ok()?;
         if base_url.trim().is_empty() || user.trim().is_empty() || token.trim().is_empty() {
@@ -344,6 +347,11 @@ mod tests {
 
     #[test]
     fn configuration_without_a_base_url_or_credentials_is_inactive() {
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::remove_var("GW_JIRA_BASE_URL");
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+
         // No provider table at all.
         assert!(JiraRest::from_config(&crate::convention_file::Loaded::default()).is_none());
 
@@ -361,9 +369,6 @@ mod tests {
         assert!(JiraRest::from_config(&missing_url).is_none());
 
         // A base URL but no credentials.
-        let _lock = crate::providers::test_support::credential_lock();
-        std::env::remove_var("GW_JIRA_USER");
-        std::env::remove_var("GW_JIRA_API_TOKEN");
         let configured = crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
@@ -375,6 +380,66 @@ mod tests {
             ..Default::default()
         };
         assert!(JiraRest::from_config(&configured).is_none());
+    }
+
+    fn jira_loaded(base_url: Option<&str>) -> crate::convention_file::Loaded {
+        crate::convention_file::Loaded {
+            providers: vec![crate::convention_file::ProviderConfig {
+                id: ProviderId::parse("jira").unwrap(),
+                kind: "jira".into(),
+                base_url: base_url.map(str::to_string),
+                done_status_category: None,
+                command: None,
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn the_environment_supplies_a_missing_base_url() {
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::set_var("GW_JIRA_BASE_URL", "https://from-env.atlassian.net");
+        std::env::set_var("GW_JIRA_USER", "me@example.com");
+        std::env::set_var("GW_JIRA_API_TOKEN", "token");
+
+        let loaded = jira_loaded(None);
+        let adapter = JiraRest::from_config(&loaded).expect("the environment supplied the URL");
+        assert_eq!(adapter.base_url, "https://from-env.atlassian.net");
+
+        std::env::remove_var("GW_JIRA_BASE_URL");
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+    }
+
+    #[test]
+    fn the_file_wins_over_the_environment_base_url() {
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::set_var("GW_JIRA_BASE_URL", "https://from-env.atlassian.net");
+        std::env::set_var("GW_JIRA_USER", "me@example.com");
+        std::env::set_var("GW_JIRA_API_TOKEN", "token");
+
+        let loaded = jira_loaded(Some("https://from-file.atlassian.net"));
+        let adapter = JiraRest::from_config(&loaded).expect("configured");
+        assert_eq!(adapter.base_url, "https://from-file.atlassian.net");
+
+        std::env::remove_var("GW_JIRA_BASE_URL");
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
+    }
+
+    #[test]
+    fn the_environment_cannot_activate_a_layout_that_omits_jira() {
+        let _lock = crate::providers::test_support::credential_lock();
+        std::env::set_var("GW_JIRA_BASE_URL", "https://from-env.atlassian.net");
+        std::env::set_var("GW_JIRA_USER", "me@example.com");
+        std::env::set_var("GW_JIRA_API_TOKEN", "token");
+
+        // No `jira` provider entry: the fallback must not switch it on.
+        assert!(JiraRest::from_config(&crate::convention_file::Loaded::default()).is_none());
+
+        std::env::remove_var("GW_JIRA_BASE_URL");
+        std::env::remove_var("GW_JIRA_USER");
+        std::env::remove_var("GW_JIRA_API_TOKEN");
     }
 
     #[test]

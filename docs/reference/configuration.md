@@ -11,7 +11,8 @@ first:
 
 There is exactly one way to configure a provider or a rule: `[convention]`.
 No shorthand table exists beside it, so two files can never disagree about
-where a value comes from.
+where a value comes from. Three further tables configure the behavior around
+conventions: `[clean]`, `[providers]`, and `[discovery]`.
 
 ## The two files
 
@@ -31,9 +32,9 @@ The files merge field by field, not file by file:
 
 | Value | Rule |
 | --- | --- |
-| A scalar (`base_url`, `done_status_category`, `strength`) | The higher level wins. |
+| A scalar (`base_url`, `done_status_category`, `strength`, `stale_after`, `repos_root`) | The higher level wins. |
 | A provider table | Merged field by field under the same provider name. |
-| `ticket_rules`, `change_rules` | The higher level **replaces** the list when it declares one, and inherits the lower level's list when it does not. `[]` explicitly clears the list. |
+| `ticket_rules`, `change_rules`, `protect`, `skip` | The higher level **replaces** the list when it declares one, and inherits the lower level's list when it does not. `[]` explicitly clears the list. |
 
 This is what makes a recipe useful: the global file declares the tools once,
 and each layout states only what differs for it.
@@ -104,6 +105,61 @@ them, and a provider that maps them to a host's search gets them without a
 change to `gw`. When a provider cannot answer a selector, it reports `unknown`,
 never "no merged change" — those mean different things.
 
+## `[clean]`
+
+Controls what `gw clean` is willing to destroy.
+
+```toml
+[clean]
+stale_after = "5w"                 # default "7d"
+protect = ["release", "hotfix"]    # added to the built-in set
+```
+
+| Key | Type | Meaning |
+| --- | --- | --- |
+| `stale_after` | duration string | A worktree with no activity within this window is a staleness candidate. Default `7d`. |
+| `protect` | list | Extra branch names that `gw` never deletes. Added to the built-in protected set; it cannot remove a built-in protection. |
+
+A duration is a positive whole number followed by `s`, `m`, `h`, `d`, `w`, or
+`mo`. Write `"3d"` for three days and `"5w"` for five weeks. Zero is rejected:
+it would make every worktree stale, which is never the intent. The same effect
+is available deliberately through `--stale-days 0`.
+
+An unreadable duration is a usage error (exit 2) that names the file and the
+accepted units. `gw` never falls back to the default silently, because doing so
+would destroy a different set of worktrees than the file asked for.
+
+## `[providers]`
+
+```toml
+[providers]
+skip = ["jira"]
+```
+
+`skip` names providers that this layout does not query. It is the file spelling
+of `--skip-provider` and `GW_SKIP_PROVIDERS`. Skips are **additive**: the
+invocation's skips and the file's skips are combined, so a flag can silence one
+more provider without the shared file repeating it.
+
+This table is not `[convention.providers]`. `[convention.providers.<id>]`
+*declares* a provider; `[providers] skip` *leaves one out* of the run.
+
+## `[discovery]`
+
+```toml
+[discovery]
+repos_root = "~/work/repos"
+```
+
+`repos_root` is the directory that holds layouts, used by `gw repos`,
+`gw init`, and `--repo <owner>/<name>`. It is the file spelling of
+`GW_REPOS_ROOT`.
+
+This key belongs in the **global** file only. `gw` searches the repos root to
+find a layout, so it must read this value before it can find the layout file.
+A `[discovery] repos_root` inside a layout's `.gw.toml` is a usage error
+(exit 2), not a setting that silently does nothing.
+
 ## `gw convention show`
 
 Prints the convention that is actually in force, where each part came from,
@@ -117,22 +173,33 @@ branch resolves to the wrong ticket, or to nothing.
 
 ## Environment variables
 
-Each variable is optional.
+Each variable is optional. A variable binds to a flag, so it has the same
+precedence as that flag.
 
-| Variable | Meaning | Default |
-| --- | --- | --- |
-| `GW_REPO` | Layout root, `.bare` path, `owner/name`, or unique name. Same as `--repo`. | discovery from the current directory |
-| `GW_CONFIG` | Use this file as the global configuration instead of `~/.gw.toml`. | `~/.gw.toml` |
-| `GW_NO_GLOBAL_CONFIG` | Any value suppresses the global file. | — |
-| `GW_CD` | Set to `1` to make a bare `gw add` change the directory of the shell. The shell integration reads this variable, not the binary. | — |
-| `GW_REPOS_ROOT` | Directory that holds layouts. `gw` expands a leading `~/`. | `~/repos` |
-| `GW_STALE_DAYS` | Stale limit in days. | `7` |
-| `GW_PROTECT` | Comma-separated branch names that `gw` must never delete. | — |
-| `GW_JIRA_BASE_URL` | JIRA base URL, when the file does not set one. | — |
-| `GW_JIRA_USER` | JIRA user name. | — |
-| `GW_JIRA_API_TOKEN` | JIRA API token. | — |
-| `GW_SKIP_PROVIDERS` | Comma-separated provider names. Same as `--skip-provider`. | — |
-| `NO_COLOR` | Any value disables color and emoji. Same as `--no-color`. | — |
+Every setting that a team can share has a file spelling. The `File key` column
+names it. A value from a flag or a variable wins over the file.
+
+| Variable | File key | Meaning | Default |
+| --- | --- | --- | --- |
+| `GW_STALE_DAYS` | `[clean] stale_after` | Stale limit. The variable is whole days; the file accepts a duration such as `"5w"`. | `7d` |
+| `GW_PROTECT` | `[clean] protect` | Branch names that `gw` must never delete. The variable is comma-separated. | — |
+| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. | — |
+| `GW_REPOS_ROOT` | `[discovery] repos_root` | Directory that holds layouts. `gw` expands a leading `~/` in either form. | `~/repos` |
+| `GW_JIRA_BASE_URL` | `[convention.providers.jira] base_url` | JIRA base URL. The file wins when both are set. | — |
+
+These variables have no file spelling, by design:
+
+| Variable | Why it cannot live in a file |
+| --- | --- |
+| `GW_JIRA_USER`, `GW_JIRA_API_TOKEN` | Credentials. They stay in the environment so they are never written to a file that might be shared or committed. |
+| `GW_REPO` | A per-invocation locator. `gw` must resolve it before it can find the layout, and therefore before it can read the layout file. |
+| `GW_CONFIG`, `GW_NO_GLOBAL_CONFIG` | They select which configuration file to read, so they cannot be stored inside one. |
+| `GW_CD` | Read by the shell integration in `shell/gw.sh`, not by the `gw` binary. |
+| `NO_COLOR` | Presentation only. It never changes a decision or the JSON shape, so a team has nothing to agree on. The flag is `--no-color`. |
+
+`GW_REPOS_ROOT` and `[discovery] repos_root` are the same setting. The file
+form works only in the global file, for the same reason `GW_REPO` cannot be in
+a file: the repos root is part of how `gw` finds a layout.
 
 ## Branch protection
 
@@ -142,7 +209,9 @@ Each variable is optional.
 - the branch that the `HEAD` of the bare repository checks out
 - each branch that a worktree checks out
 
-`GW_PROTECT` adds more branches. `gw` never deletes a protected branch.
+`[clean] protect` and `GW_PROTECT` add more branches. Both are additive, so one
+source can never remove protection that another declared. `gw` never deletes a
+protected branch.
 Worktree removal has narrower protection. Only the default branch and the bare
 `HEAD` are protected from removal, because otherwise `gw` could never remove a
 worktree.

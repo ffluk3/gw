@@ -5,6 +5,7 @@ use serde::Serialize;
 
 use crate::cli::ConventionAction;
 use crate::context::Context;
+use crate::convention_file::Origin;
 use crate::error::Error;
 use crate::output::Outcome;
 use crate::providers::Registry;
@@ -66,6 +67,12 @@ fn show(ctx: &Context, json: bool) -> Result<Outcome, Error> {
     println!();
     println!("Providers");
     for line in provider_lines(ctx.registry()) {
+        println!("    {line}");
+    }
+
+    println!();
+    println!("Settings");
+    for line in settings_lines(ctx) {
         println!("    {line}");
     }
 
@@ -262,6 +269,51 @@ fn provider_lines(registry: &Registry) -> Vec<String> {
         .collect()
 }
 
+/// The settings in force, for both renderers.
+///
+/// Each value reports the file it came from, so an unexpected stale limit or
+/// repos root can be traced to a file instead of guessed at.
+fn settings_lines(ctx: &Context) -> Vec<String> {
+    let clean = &ctx.loaded.clean;
+    let stale = match clean.stale_after_secs {
+        Some(seconds) => format!(
+            "stale_after {} ({})",
+            gw_core::format_duration_secs(seconds),
+            clean.stale_after_origin.as_str()
+        ),
+        None => format!(
+            "stale_after {} (built-in)",
+            gw_core::format_duration_secs(gw_core::Policy::default().stale_after_secs)
+        ),
+    };
+    let protect = if clean.protect.is_empty() {
+        "protect (none)".to_string()
+    } else {
+        format!(
+            "protect {} ({})",
+            clean.protect.join(", "),
+            clean.protect_origin.as_str()
+        )
+    };
+    let skip = if ctx.loaded.provider_selection.skip.is_empty() {
+        "skip (none)".to_string()
+    } else {
+        format!(
+            "skip {} ({})",
+            ctx.loaded.provider_selection.skip.join(", "),
+            ctx.loaded.provider_selection.skip_origin.as_str()
+        )
+    };
+    let repos_root = match &ctx.loaded.discovery.repos_root {
+        Some(root) => format!(
+            "repos_root {root} ({})",
+            ctx.loaded.discovery.repos_root_origin.as_str()
+        ),
+        None => "repos_root (default ~/repos)".to_string(),
+    };
+    vec![stale, protect, skip, repos_root]
+}
+
 /// The JSON shaping of `gw convention show`.
 #[derive(Debug, Serialize)]
 struct View {
@@ -270,7 +322,21 @@ struct View {
     change_rules: Vec<ChangeRuleView>,
     change_rules_origin: &'static str,
     providers: Vec<ProviderView>,
+    settings: SettingsView,
     sources: Vec<String>,
+}
+
+/// Additive: a new object, so no existing JSON field changes shape.
+#[derive(Debug, Serialize)]
+struct SettingsView {
+    stale_after_secs: i64,
+    stale_after_origin: &'static str,
+    protect: Vec<String>,
+    protect_origin: &'static str,
+    skip: Vec<String>,
+    skip_origin: &'static str,
+    repos_root: Option<String>,
+    repos_root_origin: &'static str,
 }
 
 #[derive(Debug, Serialize)]
@@ -335,6 +401,26 @@ impl View {
                     }
                 })
                 .collect(),
+            settings: SettingsView {
+                // Report the value that will actually be used, so the field is
+                // never `null` for a caller that just wants the number.
+                stale_after_secs: ctx
+                    .loaded
+                    .clean
+                    .stale_after_secs
+                    .unwrap_or_else(|| gw_core::Policy::default().stale_after_secs),
+                stale_after_origin: if ctx.loaded.clean.stale_after_secs.is_some() {
+                    ctx.loaded.clean.stale_after_origin.as_str()
+                } else {
+                    Origin::BuiltIn.as_str()
+                },
+                protect: ctx.loaded.clean.protect.clone(),
+                protect_origin: ctx.loaded.clean.protect_origin.as_str(),
+                skip: ctx.loaded.provider_selection.skip.clone(),
+                skip_origin: ctx.loaded.provider_selection.skip_origin.as_str(),
+                repos_root: ctx.loaded.discovery.repos_root.clone(),
+                repos_root_origin: ctx.loaded.discovery.repos_root_origin.as_str(),
+            },
             sources: ctx
                 .loaded
                 .sources
@@ -381,6 +467,7 @@ mod coverage_tests {
             convention: convention.clone(),
             providers,
             sources,
+            ..Loaded::default()
         };
         Context::for_test(gw_core::Layout::new(PathBuf::from("/repo")), loaded)
     }

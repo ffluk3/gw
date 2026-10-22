@@ -253,6 +253,16 @@ or `resolution`) with `reason`.
     { "id": "github", "active": true, "reason": null },
     { "id": "jira", "active": false, "reason": "set a base URL in .gw.toml and GW_JIRA_USER / GW_JIRA_API_TOKEN" }
   ],
+  "settings": {
+    "stale_after_secs": 3024000,
+    "stale_after_origin": "layout",
+    "protect": ["release"],
+    "protect_origin": "layout",
+    "skip": [],
+    "skip_origin": "built-in",
+    "repos_root": null,
+    "repos_root_origin": "built-in"
+  },
   "sources": ["/home/me/.gw.toml", "/home/me/repos/acme/widgets/.gw.toml"]
 }
 ```
@@ -264,7 +274,23 @@ or `resolution`) with `reason`.
 | `change_rules` | array | In evaluation order. |
 | `change_rules_origin` | string | Same values as above. |
 | `providers` | array | Each provider, whether it is active, and why not. |
+| `settings` | object | The resolved `[clean]`, `[providers]`, and `[discovery]` values. |
 | `sources` | array | Files read, lowest precedence first. |
+
+### `settings`
+
+The object is additive; adding it changed no existing field.
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `stale_after_secs` | integer | The limit that will be used, after precedence. Never `null`. |
+| `stale_after_origin` | string | Where it came from. `built-in` when no file set one. |
+| `protect` | array | Extra protected branches from the files. |
+| `protect_origin` | string | Where the list came from. |
+| `skip` | array | Providers the files ask to skip. |
+| `skip_origin` | string | Where the list came from. |
+| `repos_root` | string or null | The configured repos root, when the global file sets one. |
+| `repos_root_origin` | string | Where it came from. |
 
 ## `gw convention explain --json`
 
