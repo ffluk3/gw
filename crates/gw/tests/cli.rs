@@ -1609,19 +1609,46 @@ fn pretend_origin_is_github(fx: &Fixture) {
     );
 }
 
+/// A `gh` stand-in that answers each `is:pr is:merged` search with
+/// `issueCount: 1` when the branch it names is in `merged`, and `0` otherwise.
+///
+/// The adapter derives its GraphQL aliases (`b0`, `b1`, ...) from the order
+/// `git worktree list` reports, which is filesystem enumeration order, not
+/// creation order — it differs between Linux and macOS. Keying the answer on
+/// the branch inside the query string keeps a test indifferent to that order;
+/// an alias-indexed answer would hand one branch another branch's verdict.
+fn fake_merged_prs(dir: &Path, merged: &[&str]) -> PathBuf {
+    let arms: String = merged
+        .iter()
+        .map(|branch| format!("      {branch}) count=1 ;;\n"))
+        .collect();
+    let body = r#"cat > /dev/null
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    b*=*)
+      alias=${arg%%=*}
+      rest=${arg#*=}
+      head=${rest#*head:}
+      head=${head%% *}
+      count=0
+      case "$head" in
+__MERGED_ARMS__      esac
+      out="$out\"$alias\":{\"issueCount\":$count},"
+      ;;
+  esac
+done
+printf '{"data":{%s}}\n' "${out%,}"
+"#;
+    fake_binary(dir, "gh", &body.replace("__MERGED_ARMS__", &arms))
+}
+
 #[test]
 fn a_merged_github_pr_removes_the_worktree() {
     let fx = Fixture::new();
     let scripts = tempfile::tempdir().unwrap();
-    // GraphQL answers `b0.issueCount`. Anything else is a protocol failure.
-    fake_binary(
-        scripts.path(),
-        "gh",
-        // `develop` is the first query and `PROJ-40` the second; only the
-        // branch under test is merged.
-        r#"cat > /dev/null
-echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":1}}}'"#,
-    );
+    // Only the branch under test is merged; `develop` must not be.
+    fake_merged_prs(scripts.path(), &["PROJ-40"]);
     let wt = fx.add_worktree("PROJ-40");
     fx.publish("PROJ-40");
     pretend_origin_is_github(&fx);
@@ -1645,12 +1672,7 @@ echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":1}}}'"#,
 fn an_open_github_pr_leaves_the_worktree_alone() {
     let fx = Fixture::new();
     let scripts = tempfile::tempdir().unwrap();
-    fake_binary(
-        scripts.path(),
-        "gh",
-        r#"cat > /dev/null
-echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":0}}}'"#,
-    );
+    fake_merged_prs(scripts.path(), &[]);
     let wt = fx.add_worktree("PROJ-41");
     fx.publish("PROJ-41");
     pretend_origin_is_github(&fx);
