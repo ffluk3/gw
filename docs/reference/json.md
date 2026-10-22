@@ -30,10 +30,19 @@ These string values appear in more than one shape.
 | Value | Meaning |
 | --- | --- |
 | `not_checked` | No ticket key, or lookups are disabled |
-| `open` | Not in the `done` status category |
-| `closed` | In the `done` status category |
+| `open` | Not in the done status category |
+| `closed` | In the done status category |
+| `unknown` | A lookup ran and its answer could not be trusted |
 
-A closed ticket also has `resolution`, which can be `null`.
+A closed ticket also has `resolution`, which can be `null`. An `unknown` ticket
+also has `detail`.
+
+`strength`:
+
+| Value | Meaning |
+| --- | --- |
+| `identity` | The rule identifies the work. May justify removal. |
+| `mention` | The rule only associates a topic. Never justifies removal. |
 
 ## `gw status --json`
 
@@ -49,7 +58,16 @@ A closed ticket also has `resolution`, which can be `null`.
       "ticket": "PROJ-123",
       "summary": "Add rate limiting",
       "kind": "linked",
-      "ticket_state": { "status": "closed", "resolution": "Done" }
+      "ticket_state": { "status": "closed", "resolution": "Done" },
+      "tickets": [
+        {
+          "provider": "jira",
+          "id": "PROJ-123",
+          "strength": "identity",
+          "status": { "status": "closed", "resolution": "Done" },
+          "summary": "Add rate limiting"
+        }
+      ]
     }
   ]
 }
@@ -65,7 +83,11 @@ A closed ticket also has `resolution`, which can be `null`.
 | `ticket` | string or null | The ticket key in the branch name. |
 | `summary` | string or null | The JIRA summary, when available. |
 | `kind` | string | See above. |
-| `ticket_state` | object | See above. |
+| `ticket_state` | object | The primary ticket's state. See above. |
+| `tickets` | array | Every ticket observation for the branch, one per matching rule. Empty when no rule matched. |
+
+`tickets` is additive: `ticket`, `summary`, and `ticket_state` keep their
+previous meaning and describe the primary (identity-strength) observation.
 
 `gw` does not list the bare repository itself.
 
@@ -208,3 +230,69 @@ this value from flags or from the exit code.
 
 `stale`, `recently_active`, and `ticket_closed` have extra fields (`age_secs`
 or `resolution`) with `reason`.
+
+## `gw convention show --json`
+
+```json
+{
+  "ticket_rules": [
+    {
+      "provider": "jira",
+      "selector": "embedded",
+      "strength": "identity",
+      "detail": "pattern [A-Z][A-Z0-9]+-[0-9]+; projects: PROJ"
+    }
+  ],
+  "ticket_rules_origin": "layout",
+  "change_rules": [
+    { "provider": "github", "selector": "head_branch", "strength": "identity" }
+  ],
+  "change_rules_origin": "built-in",
+  "providers": [
+    { "id": "github", "active": true, "reason": null },
+    { "id": "jira", "active": false, "reason": "set a base URL in .gw.toml and GW_JIRA_USER / GW_JIRA_API_TOKEN" }
+  ],
+  "sources": ["/home/me/.gw.toml", "/home/me/repos/acme/widgets/.gw.toml"]
+}
+```
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `ticket_rules` | array | In evaluation order. |
+| `ticket_rules_origin` | string | `built-in`, `global`, `layout`, or `command_line`. |
+| `change_rules` | array | In evaluation order. |
+| `change_rules_origin` | string | Same values as above. |
+| `providers` | array | Each provider, whether it is active, and why not. |
+| `sources` | array | Files read, lowest precedence first. |
+
+## `gw convention explain --json`
+
+```json
+{
+  "branch": "feature/PROJ-77-thing",
+  "tickets": [
+    { "provider": "jira", "id": "PROJ-77", "strength": "identity", "selector": "embedded" }
+  ],
+  "changes": [
+    {
+      "provider": "github",
+      "selector": "head_branch",
+      "strength": "identity",
+      "branch": "feature/PROJ-77-thing",
+      "ticket": "PROJ-77"
+    }
+  ],
+  "rules": [
+    {
+      "rule": "ticket_rules[0]",
+      "matched": true,
+      "strength": "identity",
+      "provider": "jira",
+      "provider_active": true
+    }
+  ]
+}
+```
+
+`rules` lists every rule, including the ones that did not match, so a branch
+that resolves to nothing can be traced.

@@ -13,12 +13,14 @@ gw [GLOBAL OPTIONS] <COMMAND> [OPTIONS]
 | `--no-color` | `NO_COLOR` | Disable color and emoji. |
 | `--jira-project <KEY>` | `GW_JIRA_PROJECT` | Ticket prefixes that a branch can reference. Comma-separated, repeatable. |
 | `--jira-url <URL>` | `GW_JIRA_BASE_URL` | JIRA base URL. Must be `https://`. |
+| `--skip-provider <ID>` | `GW_SKIP_PROVIDERS` | Do not query this provider. Comma-separated, repeatable. |
+| `--skip-github` | `GW_SKIP_GITHUB` | Skip the code-host lookup. Same as `--skip-provider github`. |
 
 The argument parser provides `--help` and `--version`.
 
 ## Where commands can run
 
-`status`, `add`, and `clean` need a layout. They find the layout by walking up
+`status`, `add`, `clean`, and `convention explain` need a layout. They find the layout by walking up
 from the current directory until they reach a directory that contains
 `.bare/HEAD`. `--repo` overrides discovery.
 
@@ -100,7 +102,6 @@ Remove worktrees and delete branches.
 | `--closed` | — | Also remove worktrees whose ticket is closed. |
 | `--delete-branches` | — | Also delete stale orphan branches that are fully published. |
 | `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Default 7. |
-| `--skip-github` | `GW_SKIP_GITHUB` | Skip the merged-PR lookup. |
 | `--no-jira` | — | Skip the JIRA lookup. |
 | `--json` | — | Machine-readable plan, with `applied` to say whether it ran. |
 
@@ -152,3 +153,23 @@ directly.
 The installer copies the file to
 `${XDG_DATA_HOME:-~/.local/share}/gw/gw.sh`. A source install also keeps the
 original at `shell/gw.sh` in the checkout.
+
+## `gw convention show`
+
+Print the convention in force: each rule, whether it came from the built-in
+default or a file, and whether each provider is active.
+
+| Option | Meaning |
+| --- | --- |
+| `--json` | Machine-readable result. |
+
+## `gw convention explain <BRANCH>`
+
+Print each rule, whether it matched, and what would be queried for one branch.
+
+| Option | Meaning |
+| --- | --- |
+| `--json` | Machine-readable result. |
+
+Both commands run inside a layout because the convention can differ per
+layout. See [the configuration reference](configuration.md).

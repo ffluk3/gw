@@ -342,6 +342,15 @@ impl TicketSelector {
     }
 }
 
+/// Compile a pattern without matching anything.
+///
+/// Configuration uses this to reject an uncompilable pattern at load time.
+pub fn validate_pattern(pattern: &str) -> Result<(), String> {
+    regex::Regex::new(pattern)
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 /// Run an `Embedded` selector.
 ///
 /// Compiled on each call rather than cached: the convention resolves a few

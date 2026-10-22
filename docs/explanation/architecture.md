@@ -16,6 +16,7 @@ collected.
 | `classify` | The verdict functions and the clean plan |
 | `decision` | `Target`, `Decision`, `Reason`, `Plan`, `Counts` |
 | `policy` | The thresholds and opt-ins |
+| `convention` | What a branch name means: ordered rules that map a branch to provider queries |
 | `layout` | The on-disk convention |
 | `render` | Table, human text, and JSON rendering |
 
@@ -33,10 +34,10 @@ and JIRA, and applies plans.
 | `cli` | Argument parsing |
 | `config` | Layout discovery and root normalization |
 | `context` | Wires the layout, git handle, and configuration one time |
-| `settings` | `.gw.toml` and precedence with flags |
+| `convention_file` | Parsing `.gw.toml` and `~/.gw.toml`, and merging them |
+| `settings` | The run settings derived from the merged files |
 | `git` | Typed git operations behind `GitBackend` |
-| `github` | Batched `gh api graphql` merged-PR lookup |
-| `jira` | Batched JQL lookup over `curl` |
+| `providers` | Capability traits, the registry, and one adapter per system |
 | `repos` | Repos-root discovery and name resolution |
 | `commands` | One runner for each subcommand |
 

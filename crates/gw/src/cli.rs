@@ -57,7 +57,7 @@ pub struct Cli {
     )]
     pub jira_project: Vec<String>,
 
-    /// JIRA base URL. Overrides the value in `.gw.toml`.
+    /// JIRA base URL. Overrides the value in `.gw.toml` and `~/.gw.toml`.
     #[arg(
         long = "jira-url",
         global = true,
@@ -104,6 +104,32 @@ pub enum Command {
     Clean(CleanArgs),
     /// List the layouts under the repos root.
     Repos(ReposArgs),
+    /// Inspect the convention that maps branches to tickets and changes.
+    Convention(ConventionArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct ConventionArgs {
+    #[command(subcommand)]
+    pub action: ConventionAction,
+}
+
+#[derive(Debug, Subcommand)]
+pub enum ConventionAction {
+    /// Show the effective convention and which providers are active.
+    Show {
+        /// Machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show what each rule does with one branch, and why.
+    Explain {
+        /// Branch name to resolve.
+        branch: String,
+        /// Machine-readable output.
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Debug, Args)]

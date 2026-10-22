@@ -7,8 +7,8 @@ reviewable.
 ## Four stages
 
 1. **Snapshot.** The adapter layer collects the facts: worktrees, cleanliness,
-   activity, reachable commits, protected branches, ticket state, and merged-PR
-   state. This is the only stage that does I/O.
+   activity, reachable commits, protected branches, ticket observations, and
+   change observations. This is the only stage that does I/O.
 2. **Verdict.** A pure function finds the first applicable fact for each
    worktree, in precedence order.
 3. **Decision.** A pure function maps each verdict to a decision. It uses the
@@ -48,9 +48,16 @@ no restore data.
 ## Why `Unknown` is a value, not a default
 
 Each fact that `gw` could not observe is explicit. A missing cleanliness probe
-is `unknown`, not `clean`. Missing activity is `unknown`, not zero. Thus the
-classifier can fail closed without special cases. The protecting verdicts are
-ordinary enum members, tested in the ordinary order.
+is `unknown`, not `clean`. Missing activity is `unknown`, not zero. A failed
+ticket or change lookup is `unknown`, not "nothing found". Thus the classifier
+can fail closed without special cases. The protecting verdicts are ordinary
+enum members, tested in the ordinary order.
+
+Ticket and change state arrive as *observations*: each one names the provider
+that produced it and the strength of the association that asked for it. The
+verdict reads a fold over the identity-strength observations, so the decision
+logic never learns which vendor answered. See
+[conventions and providers](conventions.md).
 
 ## The stable output contract
 

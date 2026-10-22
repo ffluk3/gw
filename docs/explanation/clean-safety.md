@@ -18,15 +18,33 @@ fact that protects work comes before each reason to destroy work.
 5. **Unreadable `HEAD`.** Keep.
 6. **Unpublished commits.** Some commit is not reachable from a remote. Keep.
 7. **Uncommitted changes.** Keep. An unreadable status also counts here.
-8. **Merged PR.** Remove.
+8. **Merged change.** Remove. Only an identity-strength observation counts,
+   and only when no identity-strength observation for the same signal is
+   `unknown`.
 9. **Stale.** The last commit is older than the stale limit. Remove.
 10. **Closed ticket.** Remove with `--closed`. Without `--closed`,
-    recommend.
+    recommend. The same rules on strength and disagreement apply.
 11. **No signal.** Keep.
 
 If the closed-ticket fact applies but you did not give `--closed`, `gw` prints
 a recommendation and removes nothing. A recommendation is not a deletion, so it
 does not need the restore data.
+
+## Why a contested or weak fact is not evidence
+
+A branch can be associated with a ticket or a change by more than one rule, and
+a provider can fail. Two rules apply, and both are the fail-closed principle
+applied to provider facts:
+
+- **Only identity-strength evidence may destroy.** A rule that merely finds a
+  ticket mentioned in text proves a topic, not ownership.
+- **Disagreement is not evidence.** If one provider reports a merged change and
+  another cannot answer, the signal is unusable. The worktree falls through to
+  the weaker reasons, which still protect unpublished commits and dirty trees.
+
+The second rule matters because a failed lookup must never be read as "not
+merged". `unknown` is a value, and it blocks the verdict that it would have
+justified.
 
 ## Why unreadable is not clean
 

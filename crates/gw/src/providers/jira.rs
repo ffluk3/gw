@@ -15,19 +15,29 @@ use crate::providers::{Limits, TicketProvider};
 pub struct JiraRest {
     id: ProviderId,
     base_url: String,
+    done_category: String,
     user: String,
     token: String,
 }
 
 impl JiraRest {
-    /// Build an adapter from the resolved settings, or `None` when JIRA is not
-    /// configured. Callers treat absence as "provider inactive", never an error.
+    /// Build an adapter from the merged configuration, or `None` when JIRA is
+    /// not configured. Callers treat absence as "provider inactive", never an
+    /// error.
     ///
-    /// The base URL comes from `--jira-url`, `GW_JIRA_BASE_URL`, or `.gw.toml`.
-    /// Credentials come from the environment only, so they are never written to
-    /// a file that might be committed.
-    pub fn from_settings(settings: &crate::settings::Settings) -> Option<Self> {
-        let base_url = settings.jira_base_url.clone()?;
+    /// The base URL comes from `--jira-url`, `GW_JIRA_BASE_URL`, `[jira]`, or
+    /// `[convention.providers.jira]`. Credentials come from the environment
+    /// only, so they are never written to a file that might be committed.
+    /// Build an adapter from the merged configuration.
+    ///
+    /// The files win over `Settings`: a `[convention.providers.jira]` table is
+    /// the newer and more precise spelling, and `Settings` carries the legacy
+    /// `[jira]` values plus the CLI overrides.
+    pub fn from_config(loaded: &crate::convention_file::Loaded) -> Option<Self> {
+        let provider = loaded.providers.iter().find(|p| p.id.as_str() == "jira");
+        let base_url = provider
+            .and_then(|p| p.base_url.clone())
+            .or_else(|| loaded.jira_base_url.clone())?;
         let user = std::env::var("GW_JIRA_USER")
             .or_else(|_| std::env::var("JIRA_USER"))
             .ok()?;
@@ -40,6 +50,9 @@ impl JiraRest {
         Some(Self {
             id: ProviderId::parse("jira").expect("literal is a valid provider id"),
             base_url: base_url.trim_end_matches('/').to_string(),
+            done_category: provider
+                .and_then(|p| p.done_status_category.clone())
+                .unwrap_or_else(|| "done".to_string()),
             user,
             token,
         })
@@ -231,7 +244,7 @@ impl JiraRest {
     }
 
     fn done_category(&self) -> String {
-        "done".to_string()
+        self.done_category.clone()
     }
 }
 
@@ -299,6 +312,7 @@ mod tests {
         JiraRest {
             id: ProviderId::parse("jira").unwrap(),
             base_url: "https://example.atlassian.net".into(),
+            done_category: "done".into(),
             user: "u".into(),
             token: "t".into(),
         }

@@ -127,8 +127,10 @@ struct Output {
 
 /// A `gw` process with every ambient `gw` setting removed.
 ///
-/// Without this, a developer's own `GW_REPOS_ROOT` or JIRA credentials would
-/// change what the tests observe.
+/// Without this, a developer's own `GW_REPOS_ROOT`, `~/.gw.toml`, or JIRA
+/// credentials would change what the tests observe. The global configuration
+/// file is the dangerous one: it may set a convention that makes a fixture
+/// branch resolve to a different ticket than the test asserts.
 fn gw_command(cwd: &Path) -> Command {
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_gw"));
     cmd.current_dir(cwd)
@@ -137,7 +139,11 @@ fn gw_command(cwd: &Path) -> Command {
         .env_remove("GW_JIRA_PROJECT")
         .env_remove("GW_JIRA_BASE_URL")
         .env_remove("GW_JIRA_USER")
-        .env_remove("GW_JIRA_API_TOKEN");
+        .env_remove("GW_JIRA_API_TOKEN")
+        .env_remove("GW_SKIP_PROVIDERS")
+        .env_remove("GW_SKIP_GITHUB")
+        .env_remove("GW_CONFIG")
+        .env("GW_NO_GLOBAL_CONFIG", "1");
     cmd
 }
 
@@ -1032,4 +1038,206 @@ fn json_stdout_survives_lookup_failures() {
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
     serde_json::from_str::<serde_json::Value>(&out.stdout)
         .unwrap_or_else(|e| panic!("warning leaked into stdout ({e}): {:?}", out.stdout));
+}
+
+// ---- convention configuration ---------------------------------------------
+//
+// `GW_NO_GLOBAL_CONFIG` is set for every test, so the only global layer these
+// tests can exercise is the one they point `GW_CONFIG` at.
+
+#[test]
+fn convention_show_reports_the_built_in_default() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["convention", "show", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+
+    assert_eq!(json["ticket_rules"][0]["provider"], "jira");
+    assert_eq!(json["ticket_rules"][0]["selector"], "embedded");
+    assert_eq!(json["ticket_rules"][0]["strength"], "identity");
+    assert_eq!(json["change_rules"][0]["selector"], "head_branch");
+    assert_eq!(json["ticket_rules_origin"], "built-in");
+    assert!(json["sources"].as_array().unwrap().is_empty());
+}
+
+#[test]
+fn a_layout_convention_replaces_the_built_in_rules() {
+    let fx = Fixture::new();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        r#"
+[[convention.ticket_rules]]
+provider = "linear"
+selector = "embedded"
+pattern = 'eng-(?P<id>[0-9]+)'
+
+[[convention.change_rules]]
+provider = "github"
+selector = "head_branch"
+"#,
+    )
+    .unwrap();
+    fx.add_worktree("eng-42");
+
+    let out = fx.gw(&["status", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(
+        ticket_for(&json, "eng-42"),
+        "42",
+        "a custom pattern's capture group is the ticket id"
+    );
+}
+
+#[test]
+fn a_global_configuration_is_a_recipe_a_layout_can_specialize() {
+    let fx = Fixture::new();
+    let global = tempfile::tempdir().unwrap();
+    let global_file = global.path().join("gw.toml");
+    std::fs::write(
+        &global_file,
+        r#"
+[[convention.ticket_rules]]
+provider = "jira"
+selector = "embedded"
+pattern = '[A-Z][A-Z0-9]+-[0-9]+'
+"#,
+    )
+    .unwrap();
+    // The layout narrows only the project list.
+    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+    fx.add_worktree("PROJ-5");
+    fx.add_worktree("OTHER-9");
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &["status", "--json"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_CONFIG", global_file.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(ticket_for(&json, "PROJ-5"), "PROJ-5");
+    assert!(ticket_for(&json, "OTHER-9").is_null());
+}
+
+#[test]
+fn convention_show_names_both_source_files() {
+    let fx = Fixture::new();
+    let global = tempfile::tempdir().unwrap();
+    let global_file = global.path().join("gw.toml");
+    std::fs::write(
+        &global_file,
+        "[[convention.change_rules]]\nprovider = \"github\"\nselector = \"head_branch\"\n",
+    )
+    .unwrap();
+    std::fs::write(fx.root.join(".gw.toml"), "[jira]\nproject = \"PROJ\"\n").unwrap();
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &["convention", "show", "--json"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_CONFIG", global_file.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    let sources: Vec<&str> = json["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(sources.len(), 2, "both files were read: {sources:?}");
+    assert!(sources[0].ends_with("gw.toml"));
+    assert!(sources[1].ends_with(".gw.toml"));
+    assert_eq!(json["change_rules_origin"], "global");
+}
+
+#[test]
+fn an_unknown_selector_is_a_usage_error() {
+    let fx = Fixture::new();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"regex\"\n",
+    )
+    .unwrap();
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("unknown ticket selector"),
+        "stderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn an_invalid_pattern_is_a_usage_error() {
+    let fx = Fixture::new();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = \"([\"\n",
+    )
+    .unwrap();
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(
+        out.stderr.contains("invalid ticket pattern"),
+        "stderr: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn an_unknown_convention_key_is_a_usage_error() {
+    let fx = Fixture::new();
+    std::fs::write(fx.root.join(".gw.toml"), "[convention]\nserch = \"typo\"\n").unwrap();
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+#[test]
+fn explain_shows_which_rule_matched() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["convention", "explain", "feature/PROJ-77-thing", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(json["tickets"][0]["id"], "PROJ-77");
+    assert_eq!(json["rules"][0]["matched"], json!(true));
+    assert_eq!(json["rules"][0]["rule"], "ticket_rules[0]");
+}
+
+/// A branch with no ticket still has a change query, because the built-in
+/// change rule keys on the branch name rather than on a ticket. Explain must
+/// say so instead of implying that nothing will be looked up.
+#[test]
+fn explain_separates_a_ticket_miss_from_a_change_match() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["convention", "explain", "no-ticket-here", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(json["tickets"], json!([]));
+    assert_eq!(json["rules"][0]["matched"], json!(false));
+    assert_eq!(json["rules"][1]["rule"], "change_rules[0]");
+    assert_eq!(json["rules"][1]["matched"], json!(true));
+    assert_eq!(json["changes"][0]["selector"], "head_branch");
+}
+
+/// A change selector that needs a ticket does not fire without one.
+#[test]
+fn explain_skips_a_ticket_dependent_change_rule() {
+    let fx = Fixture::new();
+    std::fs::write(
+        fx.root.join(".gw.toml"),
+        "[[convention.change_rules]]\nprovider = \"github\"\nselector = \"mention_ticket\"\n",
+    )
+    .unwrap();
+    let out = fx.gw(&["convention", "explain", "no-ticket-here", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).unwrap();
+    assert_eq!(json["rules"][0]["matched"], json!(false));
+    assert_eq!(json["changes"], json!([]));
 }

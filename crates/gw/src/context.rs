@@ -15,6 +15,8 @@ pub struct Context {
     pub git: CliGit,
     /// The convention in force: what a branch name means.
     pub convention: Convention,
+    /// The full loaded configuration, kept for `gw convention show`.
+    pub loaded: crate::convention_file::Loaded,
     /// The providers available for this run.
     registry: Registry,
     pub json: bool,
@@ -44,16 +46,19 @@ impl Context {
             }
         }
 
-        let settings = Settings::load(&layout.root, &cli.jira_project, cli.jira_url.as_deref())?
-            .with_skips(skip_providers(cli), skip_github(cli));
+        let mut loaded = crate::convention_file::load(&layout.root)?;
+        apply_jira_settings(&mut loaded, &cli.jira_project, cli.jira_url.as_deref())?;
 
-        let convention = convention_for(&settings);
-        let registry = Registry::build(&settings);
+        let settings = Settings::from_loaded(&loaded, skip_providers(cli), skip_github(cli));
+
+        let registry = Registry::build(&settings, &loaded);
+        let convention = loaded.convention.clone();
 
         Ok(Self {
             git,
             layout,
             convention,
+            loaded,
             registry,
             json: cli.json,
         })
@@ -82,34 +87,57 @@ fn skip_github(cli: &Cli) -> bool {
     cli.skip_github || std::env::var_os("GW_SKIP_GITHUB").is_some()
 }
 
-/// The convention for this run.
+/// Fold the legacy JIRA settings into the convention.
 ///
-/// The built-in convention is the default. Configuration narrows it: a layout
-/// that declares JIRA projects restricts which branch prefixes count as
-/// tickets, which is the pre-convention `[jira] project` behavior expressed as
-/// a convention rule.
-fn convention_for(settings: &Settings) -> Convention {
-    let mut convention = Convention::built_in();
-    if !settings.jira_projects.is_empty() {
-        convention.ticket_rules = convention
-            .ticket_rules
-            .into_iter()
-            .map(|rule| match rule.selector {
-                gw_core::TicketSelector::Embedded { pattern, .. } => gw_core::TicketRule {
-                    selector: gw_core::TicketSelector::Embedded {
-                        pattern,
-                        allow_projects: settings.jira_projects.clone(),
-                    },
-                    ..rule
-                },
-                other => gw_core::TicketRule {
-                    selector: other,
-                    ..rule
-                },
-            })
+/// `[jira]` predates conventions, so it is translated rather than kept as a
+/// parallel mechanism. Three things happen here, in precedence order from
+/// lowest to highest:
+///
+/// 1. `[jira] project` from either file narrows every embedded ticket rule.
+/// 2. `--jira-project` / `GW_JIRA_PROJECT` replaces that list outright.
+/// 3. `--jira-url` / `GW_JIRA_BASE_URL` overrides both files' base URL.
+///
+/// Narrowing applies only to rules that already have no project filter. A
+/// `[convention.ticket_rules]` entry that names its own `allow_projects` is
+/// more specific than the legacy table and keeps it.
+fn apply_jira_settings(
+    loaded: &mut crate::convention_file::Loaded,
+    cli_projects: &[String],
+    cli_base_url: Option<&str>,
+) -> Result<(), Error> {
+    let projects = if cli_projects.is_empty() {
+        &loaded.jira_project
+    } else {
+        cli_projects
+    };
+
+    if !projects.is_empty() {
+        let normalized: Vec<String> = projects
+            .iter()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty())
             .collect();
+        for rule in &mut loaded.convention.ticket_rules {
+            let gw_core::TicketSelector::Embedded { allow_projects, .. } = &mut rule.selector;
+            if allow_projects.is_empty() {
+                *allow_projects = normalized.clone();
+            }
+        }
+        if loaded.ticket_rules_origin == crate::convention_file::Origin::BuiltIn
+            && !normalized.is_empty()
+        {
+            loaded.ticket_rules_origin = if cli_projects.is_empty() {
+                crate::convention_file::Origin::Layout
+            } else {
+                crate::convention_file::Origin::CommandLine
+            };
+        }
     }
-    convention
+
+    if let Some(url) = cli_base_url.filter(|s| !s.trim().is_empty()) {
+        loaded.jira_base_url = Some(url.to_string());
+    }
+    Ok(())
 }
 
 /// Providers named by `--skip-provider`, rejecting invalid slugs.

@@ -4,6 +4,7 @@ mod cli;
 mod commands;
 mod config;
 mod context;
+mod convention_file;
 mod error;
 mod git;
 mod output;
@@ -42,6 +43,7 @@ fn main() -> ExitCode {
         Command::Status(args) => commands::status::run(&ctx, args),
         Command::Add(args) => commands::add::run(&ctx, args),
         Command::Clean(args) => commands::clean::run(&ctx, args),
+        Command::Convention(args) => commands::convention::run(&ctx, args.action),
         Command::Init(_) | Command::Repos(_) => unreachable!("handled above"),
     };
     finish(result)

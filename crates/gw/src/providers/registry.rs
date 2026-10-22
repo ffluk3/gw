@@ -25,7 +25,7 @@ impl Registry {
     /// base URL or credentials is inactive, not failing. Every inactive
     /// provider records why, so `gw convention show` can explain it.
     #[must_use]
-    pub fn build(settings: &Settings) -> Self {
+    pub fn build(settings: &Settings, loaded: &crate::convention_file::Loaded) -> Self {
         let mut registry = Self {
             tickets: Vec::new(),
             changes: Vec::new(),
@@ -33,7 +33,7 @@ impl Registry {
             skipped: settings.skip_providers.iter().cloned().collect(),
         };
 
-        registry.add_jira(settings);
+        registry.add_jira(loaded);
         registry.add_github(settings);
 
         registry
@@ -65,12 +65,12 @@ impl Registry {
             .map(|u| u.reason.as_str())
     }
 
-    fn add_jira(&mut self, settings: &Settings) {
+    fn add_jira(&mut self, loaded: &crate::convention_file::Loaded) {
         let id = ProviderId::parse("jira").expect("literal is a valid provider id");
         if self.skipped.contains(&id) {
             return;
         }
-        match crate::providers::jira::JiraRest::from_settings(settings) {
+        match crate::providers::jira::JiraRest::from_config(loaded) {
             Some(jira) => self.tickets.push(Box::new(jira)),
             None => self.unavailable.push(Unavailable {
                 id,
@@ -102,7 +102,7 @@ mod tests {
 
     #[test]
     fn jira_without_configuration_is_inactive_and_says_why() {
-        let registry = Registry::build(&Settings::default());
+        let registry = Registry::build(&Settings::default(), &Default::default());
         let jira = ProviderId::parse("jira").unwrap();
         assert!(registry.ticket_provider(&jira).is_none());
         assert!(registry
@@ -117,7 +117,7 @@ mod tests {
             ..Settings::default()
         };
         let github = ProviderId::parse("github").unwrap();
-        let registry = Registry::build(&settings);
+        let registry = Registry::build(&settings, &Default::default());
         assert!(registry.change_provider(&github).is_none());
         assert_eq!(registry.inactive_reason(&github), Some("--skip-github"));
     }
