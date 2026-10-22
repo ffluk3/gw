@@ -590,7 +590,10 @@ mod coverage_tests {
     fn looking_up_changes_matches_each_selector_key() {
         let provider = CommandProvider::new(
             ProviderId::parse("host").unwrap(),
-            vec!["/bin/echo".into(), r#"{"protocol":1,"results":[]}"#.into()],
+            // `/bin/cat` reads stdin to EOF before answering, so the parent's
+            // write cannot race a closed pipe. It echoes the request, which is
+            // not a protocol-1 response, so every selector becomes unknown.
+            vec!["/bin/cat".into()],
             Capability::Change,
         );
         for selector in [

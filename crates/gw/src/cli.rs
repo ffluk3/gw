@@ -189,6 +189,9 @@ pub struct CleanArgs {
     pub delete_branches: bool,
 
     /// Days since the last commit before a worktree is stale.
-    #[arg(long = "stale-days", env = "GW_STALE_DAYS", default_value_t = 7)]
-    pub stale_days: i64,
+    ///
+    /// When absent, `[clean] stale_after` from `.gw.toml` applies, and when
+    /// that is absent too the built-in default is 7 days.
+    #[arg(long = "stale-days", env = "GW_STALE_DAYS")]
+    pub stale_days: Option<i64>,
 }

@@ -22,11 +22,24 @@ or a JSON run stays a dry run.
 
 ## Change the stale limit
 
-The default stale limit is 7 days after the last commit:
+The default stale limit is 7 days after the last commit. To change it for one
+run:
 
 ```bash
 gw clean --stale-days 14 --yes
 ```
+
+To change it for everyone who uses this layout, put it in `.gw.toml` at the
+layout root:
+
+```toml
+[clean]
+stale_after = "5w"
+```
+
+A duration is a number and a unit: `s`, `m`, `h`, `d`, `w`, or `mo`. Write
+`"3d"` for three days. A flag or `GW_STALE_DAYS` still wins over the file for
+one run.
 
 ## Remove worktrees with a closed ticket
 

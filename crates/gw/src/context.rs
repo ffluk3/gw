@@ -46,7 +46,7 @@ impl Context {
         }
 
         let loaded = crate::convention_file::load(&layout.root)?;
-        let registry = Registry::build(&loaded, skip_providers(cli));
+        let registry = Registry::build(&loaded, skip_providers(cli, &loaded));
         let convention = loaded.convention.clone();
 
         Ok(Self {
@@ -92,11 +92,19 @@ impl Context {
     }
 }
 
-/// Providers named by `--skip-provider`, rejecting invalid slugs.
-fn skip_providers(cli: &Cli) -> Vec<ProviderId> {
+/// Providers to leave out of this run, rejecting invalid slugs.
+///
+/// The flag and `GW_SKIP_PROVIDERS` come first, then `[providers] skip` from
+/// the files. The two sets are unioned rather than replaced: skipping is
+/// additive, so a flag can silence one more provider without a team's shared
+/// file having to repeat it, and a file cannot un-skip what the invocation
+/// asked to skip.
+fn skip_providers(cli: &Cli, loaded: &crate::convention_file::Loaded) -> Vec<ProviderId> {
     cli.skip_provider
         .iter()
-        .filter_map(|raw| ProviderId::parse(raw).ok())
+        .map(String::as_str)
+        .chain(loaded.provider_selection.skip.iter().map(String::as_str))
+        .filter_map(|raw| ProviderId::parse(raw.trim()).ok())
         .collect()
 }
 
@@ -186,7 +194,29 @@ mod coverage_tests {
             skip_provider: vec!["github".into(), "a:b".into(), " jira ".into()],
             command: Command::Status(crate::cli::StatusArgs {}),
         };
-        let skipped = skip_providers(&cli);
+        let skipped = skip_providers(&cli, &crate::convention_file::Loaded::default());
+        assert_eq!(skipped.len(), 2);
+        assert_eq!(skipped[0].as_str(), "github");
+        assert_eq!(skipped[1].as_str(), "jira");
+    }
+
+    #[test]
+    fn file_skips_are_unioned_with_flag_skips() {
+        let cli = Cli {
+            repo: None,
+            json: false,
+            no_color: false,
+            skip_provider: vec!["github".into()],
+            command: Command::Status(crate::cli::StatusArgs {}),
+        };
+        let loaded = crate::convention_file::Loaded {
+            provider_selection: crate::convention_file::ProviderSelection {
+                skip: vec!["jira".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let skipped = skip_providers(&cli, &loaded);
         assert_eq!(skipped.len(), 2);
         assert_eq!(skipped[0].as_str(), "github");
         assert_eq!(skipped[1].as_str(), "jira");

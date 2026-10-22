@@ -20,7 +20,7 @@ That order is the policy, not an implementation detail.
 | 6 | Unpublished commits | Keep | Some commit is reachable from no remote. |
 | 7 | Uncommitted changes, or an unreadable status | Keep | The work exists only here. |
 | 8 | Merged change | Remove | Only an identity-strength observation counts, and only when no identity-strength observation for the same signal is `unknown`. |
-| 9 | Stale: last commit older than the stale limit | Remove | A proxy for "abandoned". |
+| 9 | Stale: last commit older than the stale limit | Remove | A proxy for "abandoned". The limit comes from `--stale-days`/`GW_STALE_DAYS`, then `[clean] stale_after`, then 7 days. |
 | 10 | Closed ticket | Remove with `--closed`; otherwise recommend | The same strength and disagreement rules apply. |
 | 11 | No signal | Keep | Absence of evidence is not evidence. |
 
@@ -53,6 +53,16 @@ cleanliness is a boolean. So cleanliness has three states: `clean`, `dirty`, and
 The same rule applies to the last commit date. Activity from an unknown source
 is never stale, so a clock or read error cannot make a worktree old enough to
 remove.
+
+## Why a configured threshold must fail loudly
+
+`[clean] stale_after` is validated when the file loads. A value that `gw` cannot
+read stops the command with exit code 2.
+
+The alternative is worse than it looks. If an unreadable duration fell back to
+the default, `gw` would plan against a limit nobody asked for. A team that wrote
+`"5w"` and got 7 days would remove a month of worktrees. Failing closed means a
+stale limit is never silently narrower than the one in the file.
 
 ## What counts as published
 

@@ -98,7 +98,7 @@ Remove worktrees and delete branches.
 | `--yes`, `-y` | — | Apply without a prompt. |
 | `--closed` | — | Also remove worktrees whose ticket is closed. |
 | `--delete-branches` | — | Also delete stale orphan branches that are fully published. |
-| `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Default 7. |
+| `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Overrides `[clean] stale_after`. Default 7. |
 
 | `--json` | — | Machine-readable plan, with `applied` to say whether it ran. |
 

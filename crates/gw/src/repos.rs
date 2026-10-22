@@ -7,14 +7,28 @@ pub const REPOS_ROOT_ENV: &str = "GW_REPOS_ROOT";
 
 /// Root directory that holds layouts, one per `<owner>/<name>`.
 ///
-/// `GW_REPOS_ROOT` wins; otherwise `~/repos`. A leading `~/` in the variable
-/// is expanded, because a value set programmatically is not shell-expanded.
-#[must_use]
-pub fn repos_root() -> PathBuf {
-    match std::env::var(REPOS_ROOT_ENV) {
-        Ok(value) if !value.trim().is_empty() => expand_tilde(value.trim()),
-        _ => home_dir().join("repos"),
+/// Precedence: `GW_REPOS_ROOT`, then `[discovery] repos_root` in the global
+/// configuration file, then `~/repos`. A leading `~/` in either value is
+/// expanded, because a value set programmatically is not shell-expanded.
+///
+/// The layout file cannot set this: `gw` reads that file only after finding
+/// the layout, and the repos root is one of the things it searches.
+///
+/// A malformed global file is an error, not a reason to fall back to `~/repos`.
+/// Silently searching a different directory than the file asked for is how a
+/// typo becomes "gw cannot find my layouts".
+pub fn repos_root() -> Result<PathBuf, Error> {
+    if let Ok(value) = std::env::var(REPOS_ROOT_ENV) {
+        if !value.trim().is_empty() {
+            return Ok(expand_tilde(value.trim()));
+        }
     }
+    if let Some(value) = crate::convention_file::load_global_discovery()? {
+        if !value.trim().is_empty() {
+            return Ok(expand_tilde(value.trim()));
+        }
+    }
+    Ok(home_dir().join("repos"))
 }
 
 /// Resolve a `--repo` value that may be a path or a slug.
@@ -46,7 +60,7 @@ pub fn resolve_repo_arg(arg: &str, cwd: &Path) -> Result<PathBuf, Error> {
         )));
     }
 
-    let root = repos_root();
+    let root = repos_root()?;
     if value.contains('/') {
         let path = root.join(value);
         if path.is_dir() {
@@ -375,15 +389,18 @@ mod coverage_tests {
     fn the_repos_root_env_wins_and_expands_a_tilde() {
         let tmp = tempfile::tempdir().unwrap();
         let _guard = super::tests::env_guard_for_root(tmp.path());
-        assert_eq!(repos_root(), tmp.path());
+        assert_eq!(repos_root().unwrap(), tmp.path());
 
         std::env::set_var(REPOS_ROOT_ENV, "~/repos-test");
         let home = std::env::var_os("HOME").unwrap();
-        assert_eq!(repos_root(), PathBuf::from(&home).join("repos-test"));
+        assert_eq!(
+            repos_root().unwrap(),
+            PathBuf::from(&home).join("repos-test")
+        );
 
         // A blank value falls back to the default.
         std::env::set_var(REPOS_ROOT_ENV, "  ");
-        assert_eq!(repos_root(), PathBuf::from(&home).join("repos"));
+        assert_eq!(repos_root().unwrap(), PathBuf::from(&home).join("repos"));
     }
 
     #[test]

@@ -16,9 +16,24 @@ use crate::providers::Limits;
 
 use super::snapshot;
 
+/// The stale window, highest precedence first: the flag or `GW_STALE_DAYS`,
+/// then `[clean] stale_after` from `.gw.toml`, then the built-in default.
+///
+/// Precedence lives here, at the adapter boundary, so `gw-core` keeps taking a
+/// plain number of seconds and never learns where it came from.
+fn resolve_stale_after_secs(ctx: &Context, args: &CleanArgs) -> i64 {
+    if let Some(days) = args.stale_days {
+        return days.saturating_mul(86_400);
+    }
+    if let Some(seconds) = ctx.loaded.clean.stale_after_secs {
+        return seconds;
+    }
+    Policy::default().stale_after_secs
+}
+
 pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     let policy = Policy {
-        stale_after_secs: args.stale_days.saturating_mul(86_400),
+        stale_after_secs: resolve_stale_after_secs(ctx, &args),
         clean_closed_tickets: args.closed,
         delete_branches: args.delete_branches,
     };
@@ -267,7 +282,7 @@ mod tests {
             yes,
             closed: false,
             delete_branches: false,
-            stale_days: 7,
+            stale_days: Some(7),
         }
     }
 

@@ -659,3 +659,99 @@ fn mention_strength_observations_do_not_participate_in_the_fold() {
         "a mention-strength observation blocked an identity-strength answer: {plan:?}"
     );
 }
+
+// ---- configurable thresholds -----------------------------------------------
+//
+// The stale limit and the protected set are policy inputs, not hard-coded
+// facts. These properties say that changing them can only ever *narrow* what
+// is destroyed.
+
+/// A clean, published, 30-day-old worktree: stale under any limit up to 30d.
+fn aged_worktree(age_secs: i64) -> RepoSnapshot {
+    let mut worktree = clean_stale_worktree(vec![], vec![]);
+    worktree.activity = Activity {
+        age_secs,
+        source: ActivitySource::CommitDate,
+    };
+    snapshot_with(worktree)
+}
+
+/// Never destroys a worktree as stale unless its activity was observed and is
+/// at least the configured limit.
+#[test]
+fn stale_never_fires_below_the_configured_limit() {
+    for limit_days in [1, 3, 7, 14, 35] {
+        for age_days in [0, 1, 2, 3, 6, 7, 8, 13, 14, 34, 35, 40] {
+            let snap = aged_worktree(age_days * DAY);
+            let plan = classify_clean(
+                &snap,
+                &Policy {
+                    stale_after_secs: limit_days * DAY,
+                    ..Policy::default()
+                },
+            );
+            let stale = plan
+                .entries
+                .iter()
+                .any(|(_, d)| matches!(d.reason(), gw_core::Reason::Stale { .. }));
+            let expected = age_days >= limit_days;
+            assert_eq!(
+                stale, expected,
+                "age {age_days}d against a {limit_days}d limit: {plan:?}"
+            );
+        }
+    }
+}
+
+/// Raising the limit can only remove less. This is the property a team relies
+/// on when it lengthens `stale_after` in a shared file.
+#[test]
+fn a_longer_stale_limit_never_destroys_more() {
+    for age_days in [0, 1, 5, 10, 30, 60] {
+        let snap = aged_worktree(age_days * DAY);
+        let short = classify_clean(
+            &snap,
+            &Policy {
+                stale_after_secs: 7 * DAY,
+                ..Policy::default()
+            },
+        );
+        let long = classify_clean(
+            &snap,
+            &Policy {
+                stale_after_secs: 30 * DAY,
+                ..Policy::default()
+            },
+        );
+        assert!(
+            long.entries.len() <= short.entries.len(),
+            "a longer limit destroyed more at age {age_days}d"
+        );
+    }
+}
+
+/// Unknown activity is never stale, whatever the limit is. An unreadable
+/// commit date must not become evidence of abandonment.
+#[test]
+fn unknown_activity_is_stale_under_no_limit() {
+    let mut worktree = clean_stale_worktree(vec![], vec![]);
+    worktree.activity = Activity {
+        age_secs: i64::MAX,
+        source: ActivitySource::Unknown,
+    };
+    let snap = snapshot_with(worktree);
+    let plan = classify_clean(
+        &snap,
+        &Policy {
+            stale_after_secs: 0,
+            ..Policy::default()
+        },
+    );
+    assert!(
+        !plan
+            .entries
+            .iter()
+            .any(|(_, d)| matches!(d.reason(), gw_core::Reason::Stale { .. })),
+        "unknown activity was treated as stale: {plan:?}"
+    );
+}

@@ -172,6 +172,33 @@ fn run(cwd: &Path, args: &[&str]) {
     );
 }
 
+/// Add an empty commit to `worktree` whose committer date is `seconds` old.
+///
+/// `gw` measures a worktree's age from its committer date (`git log -1 %ct`),
+/// not wall-clock time, so ageing the commit is what makes a worktree stale
+/// deterministically. Sleeping instead races the clock: a `stale_after` of
+/// `"1s"` needs the commit to be a whole second old, and a commit made
+/// milliseconds earlier is usually age 0.
+fn commit_aged(worktree: &Path, seconds: i64) {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock after the epoch")
+        .as_secs() as i64;
+    let when = format!("@{} +0000", now - seconds);
+    let out = Command::new("git")
+        .current_dir(worktree)
+        .env("GIT_AUTHOR_DATE", &when)
+        .env("GIT_COMMITTER_DATE", &when)
+        .args(["commit", "--allow-empty", "-m", "age this worktree"])
+        .output()
+        .expect("run git");
+    assert!(
+        out.status.success(),
+        "aged commit failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
 #[test]
 fn status_lists_worktrees_and_skips_the_bare_entry() {
     let fx = Fixture::new();
@@ -1609,19 +1636,46 @@ fn pretend_origin_is_github(fx: &Fixture) {
     );
 }
 
+/// A `gh` stand-in that answers each `is:pr is:merged` search with
+/// `issueCount: 1` when the branch it names is in `merged`, and `0` otherwise.
+///
+/// The adapter derives its GraphQL aliases (`b0`, `b1`, ...) from the order
+/// `git worktree list` reports, which is filesystem enumeration order, not
+/// creation order — it differs between Linux and macOS. Keying the answer on
+/// the branch inside the query string keeps a test indifferent to that order;
+/// an alias-indexed answer would hand one branch another branch's verdict.
+fn fake_merged_prs(dir: &Path, merged: &[&str]) -> PathBuf {
+    let arms: String = merged
+        .iter()
+        .map(|branch| format!("      {branch}) count=1 ;;\n"))
+        .collect();
+    let body = r#"cat > /dev/null
+out=""
+for arg in "$@"; do
+  case "$arg" in
+    b*=*)
+      alias=${arg%%=*}
+      rest=${arg#*=}
+      head=${rest#*head:}
+      head=${head%% *}
+      count=0
+      case "$head" in
+__MERGED_ARMS__      esac
+      out="$out\"$alias\":{\"issueCount\":$count},"
+      ;;
+  esac
+done
+printf '{"data":{%s}}\n' "${out%,}"
+"#;
+    fake_binary(dir, "gh", &body.replace("__MERGED_ARMS__", &arms))
+}
+
 #[test]
 fn a_merged_github_pr_removes_the_worktree() {
     let fx = Fixture::new();
     let scripts = tempfile::tempdir().unwrap();
-    // GraphQL answers `b0.issueCount`. Anything else is a protocol failure.
-    fake_binary(
-        scripts.path(),
-        "gh",
-        // `develop` is the first query and `PROJ-40` the second; only the
-        // branch under test is merged.
-        r#"cat > /dev/null
-echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":1}}}'"#,
-    );
+    // Only the branch under test is merged; `develop` must not be.
+    fake_merged_prs(scripts.path(), &["PROJ-40"]);
     let wt = fx.add_worktree("PROJ-40");
     fx.publish("PROJ-40");
     pretend_origin_is_github(&fx);
@@ -1645,12 +1699,7 @@ echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":1}}}'"#,
 fn an_open_github_pr_leaves_the_worktree_alone() {
     let fx = Fixture::new();
     let scripts = tempfile::tempdir().unwrap();
-    fake_binary(
-        scripts.path(),
-        "gh",
-        r#"cat > /dev/null
-echo '{"data":{"b0":{"issueCount":0},"b1":{"issueCount":0}}}'"#,
-    );
+    fake_merged_prs(scripts.path(), &[]);
     let wt = fx.add_worktree("PROJ-41");
     fx.publish("PROJ-41");
     pretend_origin_is_github(&fx);
@@ -2203,4 +2252,227 @@ fn init_refuses_a_file_at_the_target_directory() {
     );
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
     assert!(out.stderr.contains("is not a directory"), "{}", out.stderr);
+}
+
+// ---- settings in .gw.toml --------------------------------------------------
+//
+// Every environment variable that is not a credential has a file spelling.
+// These tests pin the precedence: flag or variable, then the layout file, then
+// the built-in default.
+
+/// Write a `.gw.toml` at the layout root.
+fn write_layout_config(fx: &Fixture, body: &str) {
+    std::fs::write(fx.root.join(".gw.toml"), body).expect("write .gw.toml");
+}
+
+#[test]
+fn a_settings_only_file_is_not_ignored() {
+    // The regression this guards: `apply` used to return early when a file had
+    // no `[convention]` table, silently discarding every other section.
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-70");
+    commit_aged(&wt, 60);
+    fx.publish("PROJ-70");
+    write_layout_config(&fx, "[clean]\nstale_after = \"1s\"\n");
+
+    let out = fx.gw(&["clean", "--yes", "--skip-provider", "github"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        !wt.exists(),
+        "a file with only [clean] was ignored: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn the_stale_after_duration_holds_a_young_worktree() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-71");
+    fx.publish("PROJ-71");
+    // A worktree committed seconds ago must survive a five-week limit.
+    write_layout_config(&fx, "[clean]\nstale_after = \"5w\"\n");
+
+    let out = fx.gw(&["clean", "--yes", "--skip-provider", "github"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(wt.is_dir(), "a young worktree was treated as stale");
+}
+
+#[test]
+fn the_stale_flag_beats_the_file() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-72");
+    fx.publish("PROJ-72");
+    write_layout_config(&fx, "[clean]\nstale_after = \"5w\"\n");
+
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(!wt.exists(), "the flag did not override stale_after");
+}
+
+#[test]
+fn the_stale_environment_variable_beats_the_file() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-73");
+    fx.publish("PROJ-73");
+    write_layout_config(&fx, "[clean]\nstale_after = \"5w\"\n");
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &["clean", "--yes", "--skip-provider", "github"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_STALE_DAYS", "0"),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(!wt.exists(), "GW_STALE_DAYS did not override stale_after");
+}
+
+#[test]
+fn an_invalid_duration_is_a_usage_error_naming_the_file() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[clean]\nstale_after = \"5x\"\n");
+
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("stale_after"), "{}", out.stderr);
+    assert!(out.stderr.contains("5x"), "{}", out.stderr);
+}
+
+#[test]
+fn a_file_protected_branch_is_never_deleted() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("release");
+    commit_aged(&wt, 60);
+    fx.publish("release");
+    write_layout_config(
+        &fx,
+        "[clean]\nstale_after = \"1s\"\nprotect = [\"release\"]\n",
+    );
+
+    // Remove the worktree's checkout first, so the branch becomes an orphan
+    // and `--delete-branches` would otherwise consider it.
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--delete-branches",
+        "--skip-provider",
+        "github",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+
+    let branches = std::process::Command::new("git")
+        .current_dir(fx.bare())
+        .args(["branch", "--list", "release"])
+        .output()
+        .expect("git branch");
+    let branches = String::from_utf8_lossy(&branches.stdout).into_owned();
+    assert!(
+        branches.contains("release"),
+        "a protected branch was deleted: {branches}"
+    );
+}
+
+#[test]
+fn an_invalid_protect_branch_is_a_usage_error() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[clean]\nprotect = [\"-bad\"]\n");
+
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("protect"), "{}", out.stderr);
+}
+
+#[test]
+fn a_file_skipped_provider_does_not_run() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[providers]\nskip = [\"github\"]\n");
+
+    let out = fx.gw(&["convention", "show", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["settings"]["skip"][0], "github");
+    let github = json["providers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["id"] == "github")
+        .expect("github is reported");
+    assert_eq!(
+        github["active"], false,
+        "a file-skipped provider stayed active"
+    );
+}
+
+#[test]
+fn convention_show_reports_the_settings_and_their_origin() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[clean]\nstale_after = \"5w\"\n");
+
+    let out = fx.gw(&["convention", "show", "--json"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["settings"]["stale_after_secs"], 5 * 7 * 86_400);
+    assert_eq!(json["settings"]["stale_after_origin"], "layout");
+
+    let text = fx.gw(&["convention", "show"]);
+    assert_eq!(text.code, 0, "stderr: {}", text.stderr);
+    assert!(text.stdout.contains("stale_after 5w"), "{}", text.stdout);
+}
+
+#[test]
+fn a_repos_root_in_a_layout_file_is_refused() {
+    // The repos root is what gw searches to find a layout, so a value inside
+    // one could never take effect. Refuse rather than silently ignore.
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[discovery]\nrepos_root = \"~/elsewhere\"\n");
+
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("global file"), "{}", out.stderr);
+}
+
+#[test]
+fn the_global_file_sets_the_repos_root() {
+    let fx = Fixture::new();
+    let global = fx.root.join("global.toml");
+    std::fs::write(
+        &global,
+        format!("[discovery]\nrepos_root = \"{}\"\n", fx.root.display()),
+    )
+    .unwrap();
+
+    let out = gw_with_env(
+        &fx.root,
+        &["repos"],
+        &[("GW_CONFIG", global.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        out.stdout.contains(&fx.root.display().to_string()),
+        "the configured repos root was not used: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn a_malformed_global_file_does_not_silently_change_the_repos_root() {
+    let fx = Fixture::new();
+    let global = fx.root.join("global.toml");
+    std::fs::write(&global, "[discovery]\nrepos_root = 5\n").unwrap();
+
+    let out = gw_with_env(
+        &fx.root,
+        &["repos"],
+        &[("GW_CONFIG", global.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("global.toml"), "{}", out.stderr);
 }

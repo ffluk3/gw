@@ -21,6 +21,19 @@ Layouts live under `~/repos`, organized as `<owner>/<name>`:
 
 ```bash
 export GW_REPOS_ROOT=~/src/work
+
+To make the same choice in a file that you keep with your dotfiles, use the
+global configuration:
+
+```toml
+# ~/.gw.toml
+[discovery]
+repos_root = "~/src/work"
+```
+
+The global file is the only file that can set it. `gw` searches the repos root
+to find a layout, so it must read the root before it can find a layout's own
+`.gw.toml`.
 ```
 
 `gw` expands a leading `~/`, even when the variable comes from a program and
