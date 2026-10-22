@@ -14,7 +14,7 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
     let path = ctx.layout.worktree_path(&branch);
 
     if !args.no_fetch {
-        eprintln!("🔄 Fetching latest refs...");
+        eprintln!("{}Fetching latest refs...", ctx.decor("🔄 "));
         if let Err(e) = ctx.git.fetch_prune() {
             eprintln!("warning: fetch failed, using cached refs ({e})");
         }
@@ -36,7 +36,8 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
     match strategy {
         AddStrategy::UseExisting { path } => {
             eprintln!(
-                "⚡ Branch '{branch}' already has a worktree at {}",
+                "{}Branch '{branch}' already has a worktree at {}",
+                ctx.decor("⚡ "),
                 path.display()
             );
         }
@@ -72,6 +73,16 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
     }
 
     let path = ctx.layout.worktree_path(&branch);
+    // The wrapper announces itself by passing `--print-path`, so a standalone
+    // `--cd` is exactly the case where nobody will perform the `cd`. The
+    // warning must stay on stderr: the wrapper captures stdout as the path.
+    if args.cd && !args.print_path {
+        eprintln!(
+            "warning: gw cannot change your shell's directory; the worktree path is printed instead."
+        );
+        eprintln!("  To change directory automatically, load the shell integration:");
+        eprintln!("    source ${{XDG_DATA_HOME:-$HOME/.local/share}}/gw/gw.sh");
+    }
     if args.print_path || args.cd {
         // A bare path is a stricter contract than JSON ("the path and nothing
         // else"); the shell wrapper depends on it, so it wins over --json.
@@ -91,7 +102,7 @@ pub fn run(ctx: &Context, args: AddArgs) -> Result<Outcome, Error> {
             .unwrap_or_else(|_| "{}".into())
         );
     } else {
-        println!("✅ Worktree ready at {}", path.display());
+        println!("{}Worktree ready at {}", ctx.decor("✅ "), path.display());
     }
     Ok(Outcome::ok())
 }

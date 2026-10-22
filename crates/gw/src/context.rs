@@ -19,6 +19,8 @@ pub struct Context {
     /// The providers available for this run.
     registry: Registry,
     pub json: bool,
+    /// Whether decorative emoji are suppressed in human output.
+    no_color: bool,
 }
 
 impl Context {
@@ -45,7 +47,11 @@ impl Context {
             }
         }
 
-        let loaded = crate::convention_file::load(&layout.root)?;
+        // The default-branch layer is derived here because `Context` owns the
+        // git handle. `convention_file` is handed a path, never a backend.
+        let default_branch = git.default_branch()?;
+        let layer = default_branch_layer(&layout, default_branch.as_ref());
+        let loaded = crate::convention_file::load(&layout.root, layer.as_deref())?;
         let registry = Registry::build(&loaded, skip_providers(cli, &loaded));
         let convention = loaded.convention.clone();
 
@@ -56,6 +62,7 @@ impl Context {
             loaded,
             registry,
             json: cli.json,
+            no_color: cli.no_color,
         })
     }
 
@@ -81,6 +88,7 @@ impl Context {
             loaded,
             registry,
             json: false,
+            no_color: false,
         }
     }
 
@@ -90,20 +98,41 @@ impl Context {
     pub fn is_json(&self) -> bool {
         self.json
     }
+
+    /// A decorative glyph, or nothing when `--no-color`/`NO_COLOR` is set.
+    ///
+    /// The trailing space belongs to the glyph so plain output has no gap left
+    /// behind. Table markers (`●`, `—`) are content, not decoration, and never
+    /// pass through here.
+    pub fn decor(&self, glyph: &'static str) -> &'static str {
+        crate::output::decor(!self.no_color, glyph)
+    }
+}
+
+/// The checkout directory whose `.gw.toml` forms the default-branch layer.
+///
+/// `None` when `refs/remotes/origin/HEAD` did not resolve. The branch is never
+/// guessed from `HEAD` or a branch name: an unset ref means no layer, not a
+/// default guess.
+fn default_branch_layer(layout: &Layout, branch: Option<&gw_core::BranchName>) -> Option<PathBuf> {
+    branch.map(|branch| layout.worktree_path(branch))
 }
 
 /// Providers to leave out of this run, rejecting invalid slugs.
 ///
-/// The flag and `GW_SKIP_PROVIDERS` come first, then `[providers] skip` from
-/// the files. The two sets are unioned rather than replaced: skipping is
-/// additive, so a flag can silence one more provider without a team's shared
-/// file having to repeat it, and a file cannot un-skip what the invocation
-/// asked to skip.
+/// A non-empty `--skip-provider`/`GW_SKIP_PROVIDERS` replaces `[providers]
+/// skip` from the files; an absent or empty flag list inherits the file list.
+/// Replacement is fail-closed: skipping suppresses queries, so re-enabling a
+/// provider can only add observations, and an observation that fails is
+/// `Unknown`, which blocks destruction.
 fn skip_providers(cli: &Cli, loaded: &crate::convention_file::Loaded) -> Vec<ProviderId> {
-    cli.skip_provider
+    let selected = if cli.skip_provider.is_empty() {
+        &loaded.provider_selection.skip
+    } else {
+        &cli.skip_provider
+    };
+    selected
         .iter()
-        .map(String::as_str)
-        .chain(loaded.provider_selection.skip.iter().map(String::as_str))
         .filter_map(|raw| ProviderId::parse(raw.trim()).ok())
         .collect()
 }
@@ -201,7 +230,7 @@ mod coverage_tests {
     }
 
     #[test]
-    fn file_skips_are_unioned_with_flag_skips() {
+    fn flag_skips_replace_file_skips() {
         let cli = Cli {
             repo: None,
             json: false,
@@ -217,8 +246,44 @@ mod coverage_tests {
             ..Default::default()
         };
         let skipped = skip_providers(&cli, &loaded);
-        assert_eq!(skipped.len(), 2);
+        assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].as_str(), "github");
-        assert_eq!(skipped[1].as_str(), "jira");
+    }
+
+    #[test]
+    fn absent_flag_skips_inherit_the_file_list() {
+        let cli = Cli {
+            repo: None,
+            json: false,
+            no_color: false,
+            skip_provider: vec![],
+            command: Command::Status(crate::cli::StatusArgs {}),
+        };
+        let loaded = crate::convention_file::Loaded {
+            provider_selection: crate::convention_file::ProviderSelection {
+                skip: vec!["jira".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let skipped = skip_providers(&cli, &loaded);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].as_str(), "jira");
+    }
+
+    #[test]
+    fn the_default_branch_layer_preserves_slashes_and_skips_none() {
+        let layout = Layout::new(std::path::PathBuf::from("/repo"));
+        let develop = gw_core::BranchName::parse("develop").unwrap();
+        let feature = gw_core::BranchName::parse("feature/x").unwrap();
+        assert_eq!(
+            default_branch_layer(&layout, Some(&develop)),
+            Some(std::path::PathBuf::from("/repo/worktrees/develop"))
+        );
+        assert_eq!(
+            default_branch_layer(&layout, Some(&feature)),
+            Some(std::path::PathBuf::from("/repo/worktrees/feature/x"))
+        );
+        assert_eq!(default_branch_layer(&layout, None), None);
     }
 }

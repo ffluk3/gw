@@ -33,8 +33,8 @@ and JIRA, and applies plans.
 | --- | --- |
 | `cli` | Argument parsing |
 | `config` | Layout discovery and root normalization |
-| `context` | Wires the layout, git handle, and configuration one time |
-| `convention_file` | Parsing `.gw.toml` and `~/.gw.toml`, and merging them |
+| `context` | Wires the layout, git handle, and configuration one time, and computes the default-branch layer from `origin/HEAD` |
+| `convention_file` | Parsing the global, default-branch, and layout `.gw.toml` files, and merging them |
 | `settings` | The run settings derived from the merged files |
 | `git` | Typed git operations behind `GitBackend` |
 | `providers` | Capability traits, the registry, and one adapter per system |
@@ -75,7 +75,7 @@ main
   -> otherwise: resolve and load Context
        -> discover layout
        -> infer worktrees directory
-       -> load settings
+       -> load settings (global, default-branch, layout)
   -> command runner
        -> gather snapshot (I/O)
        -> classify (pure)

@@ -38,8 +38,10 @@ carries the tip commit. This gives three properties:
 - a test can assert a decision exactly
 
 `Prune` is separate from `Remove`. Pruning the metadata of a worktree whose
-directory is already gone destroys no checkout and no ref. Thus the same
-confirmations do not gate it.
+directory is already gone destroys no checkout and no ref. The executor
+realizes every `Prune` in a plan with one repository-wide `git worktree prune`;
+a failure is a warning, not a destructive failure. The admission gate admits a
+plan with real work, so `--yes` can apply a prune-only plan.
 
 `Recommend` is separate from `Delete`. It describes work that is worth doing
 but that the current policy does not enable. It destroys nothing, so it needs

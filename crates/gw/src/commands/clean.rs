@@ -42,7 +42,11 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     // In JSON mode stdout carries exactly one JSON document. Every progress
     // line goes to stderr so a consumer can parse stdout without stripping.
     if !ctx.is_json() {
-        println!("🔍 Scanning worktrees in {}", ctx.layout.root.display());
+        println!(
+            "{}Scanning worktrees in {}",
+            ctx.decor("🔍 "),
+            ctx.layout.root.display()
+        );
     }
 
     // Refresh remote refs so "unpublished" is judged against current origin.
@@ -63,7 +67,8 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         let branches: std::collections::BTreeSet<&str> =
             queries.iter().map(|q| q.branch.as_str()).collect();
         let progress = format!(
-            "🔄 Checking {} change(s) across {} worktree(s)...",
+            "{}Checking {} change(s) across {} worktree(s)...",
+            ctx.decor("🔄 "),
             queries.len(),
             branches.len()
         );
@@ -92,7 +97,7 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
             println!("(no worktrees)");
         } else {
             print!("{}", render_table(&plan));
-            print_recommendations(&plan);
+            print_recommendations(ctx, &plan);
         }
     }
 
@@ -100,7 +105,7 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         if ctx.is_json() {
             println!("{}", gw_core::render::json::to_json_string(&plan, false));
         }
-        if !plan.is_empty() && !ctx.is_json() {
+        if announces_dry_run(&args, &plan, ctx.is_json()) {
             println!();
             println!("Dry run — nothing changed. Re-run with --yes to apply.");
         }
@@ -108,14 +113,6 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
     }
 
     let outcome = execute(ctx, &plan);
-
-    if !ctx.is_json() {
-        println!();
-        println!("🌳 Pruning worktree metadata...");
-    }
-    if let Err(e) = ctx.git.worktree_prune() {
-        eprintln!("warning: {e}");
-    }
 
     if ctx.is_json() {
         // Printed after execution so `applied: true` describes work that has
@@ -126,21 +123,39 @@ pub fn run(ctx: &Context, args: CleanArgs) -> Result<Outcome, Error> {
         let counts = plan.counts();
         println!();
         println!(
-            "✅ Done — removed {} worktree(s), deleted {} branch(es), {} kept",
-            counts.to_remove, counts.to_delete, counts.kept
+            "{}Done — removed {} worktree(s), deleted {} branch(es), pruned {} metadata, {} kept",
+            ctx.decor("✅ "),
+            counts.to_remove,
+            counts.to_delete,
+            counts.to_prune,
+            counts.kept
         );
     }
     Ok(outcome)
 }
 
-/// Applying requires an explicit opt-in, and the default posture is a dry run
-/// whenever a human is not there to watch.
+/// Whether to print the "Dry run — nothing changed" notice.
+///
+/// It appears only when the plan is non-empty, the output is human-facing, and
+/// `--yes` was not supplied. A `--yes` run whose plan had no work to do is not
+/// a dry run and must not claim to be one.
+fn announces_dry_run(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
+    !plan.is_empty() && !json && !args.yes
+}
+
+/// Applying requires planned work and an explicit opt-in, and the default
+/// posture is a dry run whenever a human is not there to watch.
+///
+/// The gate is *planned work*, not destructiveness: a prune-only plan has
+/// real, non-destructive work and must be applicable. Plans with nothing to
+/// remove, delete, or prune never run.
 ///
 /// A caller that asked for JSON is treated as a script even when stdout is a
 /// terminal: an agent harness may allocate a pty, and `--json` is a request
 /// for machine output, not a confirmation. Only `--yes` applies there.
 fn should_apply(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
-    if plan.destructive().count() == 0 {
+    let counts = plan.counts();
+    if counts.to_remove + counts.to_delete + counts.to_prune == 0 {
         return false;
     }
     if args.dry_run {
@@ -156,7 +171,7 @@ fn should_apply(args: &CleanArgs, plan: &Plan, json: bool) -> bool {
     std::io::stdout().is_terminal()
 }
 
-fn print_recommendations(plan: &Plan) {
+fn print_recommendations(ctx: &Context, plan: &Plan) {
     let recommended: Vec<_> = plan
         .entries
         .iter()
@@ -167,7 +182,8 @@ fn print_recommendations(plan: &Plan) {
     }
     println!();
     println!(
-        "🎫 {} worktree(s) can be removed with --closed:",
+        "{}{} worktree(s) can be removed with --closed:",
+        ctx.decor("🎫 "),
         recommended.len()
     );
     for (target, decision) in recommended {
@@ -189,6 +205,7 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
     let mut succeeded = 0;
     let mut failed = 0;
     let mut deleted: Vec<(String, String)> = Vec::new();
+    let mut pruned: Vec<String> = Vec::new();
     // In JSON mode stdout is reserved for the single plan document, so the
     // per-action lines go to stderr like every other progress line.
     let narrate = !ctx.is_json();
@@ -208,7 +225,8 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
                         succeeded += 1;
                         if narrate {
                             println!(
-                                "🗑️  removed {} ({})",
+                                "{}removed {} ({})",
+                                ctx.decor("🗑️  "),
                                 branch.as_ref().map_or_else(
                                     || path.display().to_string(),
                                     |b| b.as_str().to_string()
@@ -219,7 +237,11 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
                     }
                     Err(e) => {
                         failed += 1;
-                        eprintln!("❌ could not remove {}: {e}", path.display());
+                        eprintln!(
+                            "{}could not remove {}: {e}",
+                            ctx.decor("❌ "),
+                            path.display()
+                        );
                     }
                 }
             }
@@ -229,16 +251,52 @@ fn execute(ctx: &Context, plan: &Plan) -> Outcome {
                         succeeded += 1;
                         deleted.push((name.as_str().to_string(), tip.as_str().to_string()));
                         if narrate {
-                            println!("🗑️  deleted branch {} at {}", name.as_str(), tip.short(11));
+                            println!(
+                                "{}deleted branch {} at {}",
+                                ctx.decor("🗑️  "),
+                                name.as_str(),
+                                tip.short(11)
+                            );
                         }
                     }
                     Err(e) => {
                         failed += 1;
-                        eprintln!("❌ could not delete {}: {e}", name.as_str());
+                        eprintln!(
+                            "{}could not delete {}: {e}",
+                            ctx.decor("❌ "),
+                            name.as_str()
+                        );
                     }
                 }
             }
+            (Target::Worktree { path, branch }, Decision::Prune { .. }) => {
+                // Recorded, not executed per target: `git worktree prune` is
+                // repository-wide (see below).
+                pruned.push(
+                    branch
+                        .as_ref()
+                        .map_or_else(|| path.display().to_string(), |b| b.as_str().to_string()),
+                );
+            }
             _ => {}
+        }
+    }
+
+    if !pruned.is_empty() {
+        // `git worktree prune` has no per-target form. It drops metadata for
+        // every prunable entry in the repository, including one the plan
+        // classified Keep or Skip. That is metadata-only: no ref and no
+        // directory is deleted. A failure is a warning and does not change the
+        // exit code, because the next run retries it.
+        match ctx.git.worktree_prune() {
+            Ok(()) => {
+                if narrate {
+                    for name in &pruned {
+                        println!("{}pruned metadata for {name}", ctx.decor("🧹 "));
+                    }
+                }
+            }
+            Err(e) => eprintln!("warning: {e}"),
         }
     }
 
@@ -315,6 +373,21 @@ mod tests {
         }
     }
 
+    /// A plan whose only work is non-destructive: prune metadata.
+    pub(super) fn prune_only_plan() -> Plan {
+        Plan {
+            entries: vec![(
+                Target::Worktree {
+                    path: std::path::PathBuf::from("/repo/worktrees/feature/x"),
+                    branch: Some(BranchName::parse("feature/x").unwrap()),
+                },
+                Decision::Prune {
+                    reason: Reason::Prunable,
+                },
+            )],
+        }
+    }
+
     #[test]
     fn a_plan_with_nothing_destructive_never_applies() {
         assert!(!should_apply(
@@ -351,14 +424,69 @@ mod tests {
             true
         ));
     }
+
+    #[test]
+    fn a_prune_only_plan_is_admitted_by_yes() {
+        assert!(should_apply(&args(true, false), &prune_only_plan(), false));
+        assert!(should_apply(&args(true, false), &prune_only_plan(), true));
+        // A dry run refuses even a non-destructive plan.
+        assert!(!should_apply(&args(true, true), &prune_only_plan(), false));
+        // JSON without --yes stays a plan.
+        assert!(!should_apply(&args(false, false), &prune_only_plan(), true));
+        // Without --yes the terminal decides, exactly as for destructive work.
+        assert_eq!(
+            should_apply(&args(false, false), &prune_only_plan(), false),
+            std::io::stdout().is_terminal()
+        );
+    }
+
+    #[test]
+    fn the_dry_run_notice_requires_no_yes_a_non_empty_plan_and_human_output() {
+        assert!(announces_dry_run(
+            &args(false, false),
+            &prune_only_plan(),
+            false
+        ));
+        assert!(!announces_dry_run(
+            &args(true, false),
+            &prune_only_plan(),
+            false
+        ));
+        assert!(!announces_dry_run(
+            &args(true, true),
+            &prune_only_plan(),
+            false
+        ));
+        assert!(!announces_dry_run(
+            &args(false, false),
+            &prune_only_plan(),
+            true
+        ));
+        // A non-empty Keep-only plan still describes a plan, so the notice is
+        // accurate. Only `--yes` suppresses it.
+        assert!(announces_dry_run(
+            &args(false, false),
+            &non_destructive_plan(),
+            false
+        ));
+        assert!(!announces_dry_run(&args(false, false), &Plan::new(), false));
+    }
 }
 
 #[cfg(test)]
 mod render_tests {
     use super::tests::{args, destructive_plan, non_destructive_plan};
     use super::*;
+    use crate::context::Context;
     use gw_core::decision::Reason;
     use gw_core::model::BranchName;
+
+    fn render_ctx() -> Context {
+        Context::for_test(
+            Layout::new(std::path::PathBuf::from("/repo")),
+            Default::default(),
+        )
+    }
 
     fn worktree(branch: Option<&str>) -> Target {
         Target::Worktree {
@@ -400,7 +528,7 @@ mod render_tests {
                 },
             },
         );
-        print_recommendations(&plan);
+        print_recommendations(&render_ctx(), &plan);
     }
 
     #[test]
@@ -412,7 +540,7 @@ mod render_tests {
                 reason: Reason::Protected,
             },
         );
-        print_recommendations(&plan);
+        print_recommendations(&render_ctx(), &plan);
     }
 
     fn stdin_is_a_terminal() -> bool {

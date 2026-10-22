@@ -10,7 +10,7 @@ use crate::output::Outcome;
 /// This is the one command that does not require an existing layout, so it does
 /// not go through `Context`. The repository, branch, and destination are all
 /// explicit instead of hardcoded.
-pub fn run(args: InitArgs, json: bool) -> Result<Outcome, Error> {
+pub fn run(args: InitArgs, json: bool, no_color: bool) -> Result<Outcome, Error> {
     let root = match args.dir {
         Some(dir) => dir,
         None => default_root(&args.remote, &crate::repos::repos_root()?)?,
@@ -40,7 +40,10 @@ pub fn run(args: InitArgs, json: bool) -> Result<Outcome, Error> {
 
     // JSON mode reserves stdout for the single result document.
     if !json {
-        println!("🏗  Creating worktree layout");
+        println!(
+            "{}Creating worktree layout",
+            crate::output::decor(!no_color, "🏗  ")
+        );
         println!("   remote    : {}", args.remote);
         println!("   root      : {}", root.display());
         println!("   bare repo : {}", bare.display());
@@ -126,7 +129,7 @@ pub fn run(args: InitArgs, json: bool) -> Result<Outcome, Error> {
     }
 
     println!();
-    println!("✅ Layout ready");
+    println!("{}Layout ready", crate::output::decor(!no_color, "✅ "));
     println!();
     println!("Start working:");
     println!("   cd {}", checkout.display());

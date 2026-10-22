@@ -43,7 +43,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub json: bool,
 
-    /// Disable color and emoji.
+    /// Strip decorative emoji from human output.
+    ///
+    /// JSON documents and table content, including the `●` and `—` markers,
+    /// are unaffected.
     #[arg(long, global = true, env = "NO_COLOR")]
     pub no_color: bool,
 
@@ -92,18 +95,11 @@ pub struct ConventionArgs {
 #[derive(Debug, Subcommand)]
 pub enum ConventionAction {
     /// Show the effective convention and which providers are active.
-    Show {
-        /// Machine-readable output.
-        #[arg(long)]
-        json: bool,
-    },
+    Show,
     /// Show what each rule does with one branch, and why.
     Explain {
         /// Branch name to resolve.
         branch: String,
-        /// Machine-readable output.
-        #[arg(long)]
-        json: bool,
     },
 }
 
@@ -146,7 +142,8 @@ pub struct AddArgs {
     /// With the shell integration sourced this is already the default, so the
     /// flag is only needed to override `GW_CD=0`. A process cannot change its
     /// parent shell's directory, so the shell function acts on this flag. Run
-    /// standalone, `gw` prints the path and nothing else, like `--print-path`.
+    /// standalone, `gw` prints the path on stdout and warns on stderr that it
+    /// cannot change your shell's directory.
     #[arg(long, overrides_with = "no_cd")]
     pub cd: bool,
 

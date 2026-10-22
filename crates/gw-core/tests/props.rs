@@ -295,7 +295,12 @@ fn never_touches_the_harness_worktrees() {
         for pi in 0..4 {
             let (snap, plan) = run(seed, DAY, pi);
             for (target, decision) in &plan.entries {
-                if !decision.is_destructive() {
+                // `Prune` is not destructive, but the executor's repository-wide
+                // prune must never be *planned* against a harness worktree.
+                if !matches!(
+                    decision,
+                    Decision::Remove { .. } | Decision::Delete { .. } | Decision::Prune { .. }
+                ) {
                     continue;
                 }
                 let Target::Worktree { path, .. } = target else {
@@ -305,8 +310,41 @@ fn never_touches_the_harness_worktrees() {
                 assert_ne!(
                     wt.kind,
                     WorktreeKind::Harness,
-                    "seed={seed} policy={pi} planned destruction of a harness worktree"
+                    "seed={seed} policy={pi} planned an action on a harness worktree"
                 );
+            }
+        }
+    }
+}
+
+/// A worktree whose directory git reports as gone is never destroyed.
+///
+/// `Prunable` is an observed fact, and pruning destroys no checkout and no
+/// ref. Conversely, `Prune` is only ever planned for that observed fact: an
+/// unreadable state is not "the directory is gone".
+#[test]
+fn prunable_worktrees_are_never_destroyed() {
+    for seed in 0..200 {
+        for pi in 0..4 {
+            let (snap, plan) = run(seed, DAY, pi);
+            for (target, decision) in &plan.entries {
+                let Target::Worktree { path, .. } = target else {
+                    continue;
+                };
+                let wt = snap.worktrees.iter().find(|w| &w.path == path).unwrap();
+                if wt.kind == WorktreeKind::Prunable {
+                    assert!(
+                        !matches!(decision, Decision::Remove { .. } | Decision::Delete { .. }),
+                        "seed={seed} policy={pi} destroyed prunable worktree {path:?}: {decision:?}"
+                    );
+                }
+                if matches!(decision, Decision::Prune { .. }) {
+                    assert_eq!(
+                        wt.kind,
+                        WorktreeKind::Prunable,
+                        "seed={seed} policy={pi} planned Prune for non-prunable {path:?}"
+                    );
+                }
             }
         }
     }

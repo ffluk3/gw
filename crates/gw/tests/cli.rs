@@ -63,6 +63,17 @@ impl Fixture {
         run(&bare, &["config", "user.email", "test@example.com"]);
         run(&bare, &["config", "user.name", "Test"]);
         run(&bare, &["fetch", "origin"]);
+        // A real clone records the remote's default branch here. `gw` reads it
+        // for the default-branch configuration layer and for protection, and
+        // never guesses it from HEAD.
+        run(
+            &bare,
+            &[
+                "symbolic-ref",
+                "refs/remotes/origin/HEAD",
+                "refs/remotes/origin/develop",
+            ],
+        );
 
         std::fs::create_dir_all(root.join("worktrees")).unwrap();
         run(
@@ -141,6 +152,8 @@ fn gw_command(cwd: &Path) -> Command {
         .env_remove("GW_JIRA_API_TOKEN")
         .env_remove("GW_SKIP_PROVIDERS")
         .env_remove("GW_CONFIG")
+        .env_remove("NO_COLOR")
+        .env_remove("GW_PROTECT")
         .env("GW_NO_GLOBAL_CONFIG", "1");
     cmd
 }
@@ -888,7 +901,7 @@ fn add_print_path_beats_json() {
 /// the shell the bare path the wrapper `cd`s into. Anything else on stdout
 /// would be pasted into `cd`.
 #[test]
-fn add_cd_prints_only_the_path() {
+fn add_cd_prints_only_the_path_and_warns_on_stderr() {
     let fx = Fixture::new();
     let out = fx.gw(&["add", "PROJ-24", "--no-fetch", "--cd", "--json"]);
     assert_eq!(out.code, 0, "stderr: {}", out.stderr);
@@ -902,6 +915,22 @@ fn add_cd_prints_only_the_path() {
         out.stdout
     );
     assert!(out.stdout.trim().ends_with("worktrees/PROJ-24"));
+    // Standalone there is no shell function to perform the `cd`, so the
+    // warning names the fix. It must never reach stdout.
+    assert!(out.stderr.contains("warning:"), "{}", out.stderr);
+    assert!(out.stderr.contains("source"), "{}", out.stderr);
+    assert!(out.stderr.contains("gw.sh"), "{}", out.stderr);
+}
+
+/// `--print-path` is the wrapper's signal that it will consume the path, so
+/// there is nobody to warn.
+#[test]
+fn add_cd_is_silent_with_print_path() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["add", "PROJ-26", "--no-fetch", "--cd", "--print-path"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert_eq!(out.stdout.lines().count(), 1, "output: {}", out.stdout);
+    assert!(!out.stderr.contains("warning:"), "{}", out.stderr);
 }
 
 /// `--no-cd` opts out of the shell integration's default, and the last of the
@@ -2476,4 +2505,435 @@ fn a_malformed_global_file_does_not_silently_change_the_repos_root() {
     );
     assert_eq!(out.code, 2, "stderr: {}", out.stderr);
     assert!(out.stderr.contains("global.toml"), "{}", out.stderr);
+}
+
+// ---- the default-branch configuration layer --------------------------------
+
+/// Write the per-checkout settings file in the default-branch worktree.
+fn write_default_branch_config(fx: &Fixture, body: &str) {
+    std::fs::write(fx.root.join("worktrees/develop/.gw.toml"), body)
+        .expect("write default-branch .gw.toml");
+}
+
+fn show_json(fx: &Fixture, global_file: &Path) -> serde_json::Value {
+    let out = gw_with_env(
+        &fx.bare(),
+        &["convention", "show", "--json"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_CONFIG", global_file.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    serde_json::from_str(&out.stdout).expect("valid json")
+}
+
+#[test]
+fn the_default_branch_layer_sits_between_layout_and_global() {
+    let fx = Fixture::new();
+    let global = tempfile::tempdir().unwrap();
+    let global_file = global.path().join("gw.toml");
+    std::fs::write(&global_file, "[clean]\nstale_after = \"5w\"\n").unwrap();
+    write_default_branch_config(&fx, "[clean]\nstale_after = \"1d\"\n");
+    write_layout_config(&fx, "[clean]\nstale_after = \"2d\"\n");
+
+    // The layout file is the highest file layer.
+    let json = show_json(&fx, &global_file);
+    assert_eq!(json["settings"]["stale_after_origin"], "layout");
+    assert_eq!(json["settings"]["stale_after_secs"], json!(2 * 86_400));
+    let sources: Vec<&str> = json["sources"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert_eq!(sources.len(), 3, "lowest precedence first: {sources:?}");
+    assert_eq!(sources[0], global_file.to_str().unwrap());
+    assert!(
+        sources[1].ends_with("worktrees/develop/.gw.toml"),
+        "{sources:?}"
+    );
+    assert!(sources[2].ends_with("/.gw.toml"), "{sources:?}");
+
+    // Without the layout file, the default-branch layer wins.
+    std::fs::remove_file(fx.root.join(".gw.toml")).unwrap();
+    let json = show_json(&fx, &global_file);
+    assert_eq!(json["settings"]["stale_after_origin"], "default-branch");
+    assert_eq!(json["settings"]["stale_after_secs"], json!(86_400));
+
+    // With `origin/HEAD` unset the layer is skipped, never guessed from HEAD.
+    run(
+        &fx.bare(),
+        &["symbolic-ref", "--delete", "refs/remotes/origin/HEAD"],
+    );
+    let json = show_json(&fx, &global_file);
+    assert_eq!(json["settings"]["stale_after_origin"], "global");
+    assert_eq!(json["settings"]["stale_after_secs"], json!(5 * 7 * 86_400));
+}
+
+/// `GW_CONFIG` selects the global slot; it does not replace the layer between
+/// it and the layout file.
+#[test]
+fn gw_config_does_not_replace_the_default_branch_layer() {
+    let fx = Fixture::new();
+    let global = tempfile::tempdir().unwrap();
+    let global_file = global.path().join("gw.toml");
+    std::fs::write(&global_file, "[clean]\nstale_after = \"5w\"\n").unwrap();
+    write_default_branch_config(&fx, "[clean]\nstale_after = \"1d\"\n");
+
+    let json = show_json(&fx, &global_file);
+    assert_eq!(json["settings"]["stale_after_origin"], "default-branch");
+    assert_eq!(json["settings"]["stale_after_secs"], json!(86_400));
+}
+
+#[test]
+fn a_repos_root_in_the_default_branch_file_is_refused() {
+    let fx = Fixture::new();
+    write_default_branch_config(&fx, "[discovery]\nrepos_root = \"~/elsewhere\"\n");
+
+    let out = fx.gw(&["status"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("global file"), "{}", out.stderr);
+}
+
+// ---- environment precedence -------------------------------------------------
+
+#[test]
+fn the_environment_jira_base_url_beats_the_file() {
+    let fx = Fixture::new();
+    let scripts = tempfile::tempdir().unwrap();
+    jira_layout(&fx, "https://from-file.atlassian.net");
+    // Answer only when the request went to the environment's host, so the
+    // summary proves which URL won.
+    fake_binary(
+        scripts.path(),
+        "curl",
+        r#"cat > /dev/null
+case "$*" in
+  *from-env.atlassian.net*)
+    echo '{"issues":[{"key":"PROJ-87","fields":{"status":{"statusCategory":{"key":"indeterminate"}},"summary":"from env"}}]}'
+    ;;
+  *) echo '{"issues":[]}' ;;
+esac"#,
+    );
+    fx.add_worktree("PROJ-87");
+
+    let mut env = jira_env(&fx);
+    env.push(("GW_JIRA_BASE_URL", "https://from-env.atlassian.net"));
+    let out = gw_with_fakes(
+        &fx.bare(),
+        &["status", "--json", "--skip-provider", "github"],
+        scripts.path(),
+        &env,
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    let row = json["worktrees"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|w| w["branch"] == "PROJ-87")
+        .expect("row");
+    assert_eq!(
+        row["summary"], "from env",
+        "the file base URL was used instead of GW_JIRA_BASE_URL: {row}"
+    );
+}
+
+#[test]
+fn a_skip_flag_replaces_the_file_skip_list() {
+    let fx = Fixture::new();
+    write_layout_config(&fx, "[providers]\nskip = [\"github\"]\n");
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &["convention", "show", "--json", "--skip-provider", "jira"],
+        &[("GW_REPO", fx.root.to_str().unwrap())],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    // `settings` still describes the files; `providers[].active` describes the
+    // effective selection after the flag replaced it.
+    assert_eq!(json["settings"]["skip"][0], "github");
+    let providers = json["providers"].as_array().unwrap();
+    let github = providers.iter().find(|p| p["id"] == "github").unwrap();
+    let jira = providers.iter().find(|p| p["id"] == "jira").unwrap();
+    assert_eq!(
+        github["active"], true,
+        "the flag did not replace the file's skip list: {json}"
+    );
+    assert_eq!(jira["active"], false, "the flag did not skip jira: {json}");
+}
+
+fn branch_exists(fx: &Fixture, name: &str) -> bool {
+    let out = Command::new("git")
+        .current_dir(fx.bare())
+        .args(["branch", "--list", name])
+        .output()
+        .expect("git branch");
+    String::from_utf8_lossy(&out.stdout).contains(name)
+}
+
+#[test]
+fn gw_protect_adds_to_the_file_protect_list() {
+    let fx = Fixture::new();
+    for branch in ["release", "hotfix", "plain"] {
+        run(&fx.bare(), &["branch", branch, "develop"]);
+        fx.publish(branch);
+    }
+    write_layout_config(
+        &fx,
+        "[clean]\nstale_after = \"1s\"\nprotect = [\"release\"]\n",
+    );
+
+    let out = gw_with_env(
+        &fx.bare(),
+        &[
+            "clean",
+            "--yes",
+            "--delete-branches",
+            "--skip-provider",
+            "github",
+            "--stale-days",
+            "0",
+        ],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_PROTECT", "hotfix"),
+        ],
+    );
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        branch_exists(&fx, "release"),
+        "the file's protection was lost"
+    );
+    assert!(branch_exists(&fx, "hotfix"), "GW_PROTECT did not protect");
+    assert!(!branch_exists(&fx, "plain"), "the run deleted nothing");
+}
+
+#[test]
+fn an_invalid_gw_protect_entry_is_a_usage_error() {
+    let fx = Fixture::new();
+    let out = gw_with_env(
+        &fx.bare(),
+        &["status"],
+        &[
+            ("GW_REPO", fx.root.to_str().unwrap()),
+            ("GW_PROTECT", "not a branch"),
+        ],
+    );
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("GW_PROTECT"), "{}", out.stderr);
+}
+
+// ---- prune execution --------------------------------------------------------
+
+/// Whether `git worktree list` still reports a checkout ending in `suffix`.
+fn worktree_listed(fx: &Fixture, suffix: &str) -> bool {
+    let out = Command::new("git")
+        .current_dir(fx.bare())
+        .args(["worktree", "list", "--porcelain"])
+        .output()
+        .expect("git worktree list");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .any(|line| line.starts_with("worktree ") && line.ends_with(suffix))
+}
+
+#[test]
+fn a_prune_only_plan_applies_with_yes() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-81");
+    // Remove the directory behind git's back, so git reports the entry
+    // prunable. Nothing is checked out there any more.
+    std::fs::remove_dir_all(&wt).unwrap();
+    assert!(worktree_listed(&fx, "worktrees/PROJ-81"));
+
+    let planned = fx.gw(&["clean", "--json", "--skip-provider", "github"]);
+    assert_eq!(planned.code, 0, "stderr: {}", planned.stderr);
+    let json: serde_json::Value = serde_json::from_str(&planned.stdout).expect("valid json");
+    assert_eq!(json["applied"], json!(false));
+    assert!(json["counts"]["to_prune"].as_u64().unwrap() >= 1, "{json}");
+    assert_eq!(json["counts"]["to_remove"], json!(0));
+    assert_eq!(json["counts"]["to_delete"], json!(0));
+    assert!(worktree_listed(&fx, "worktrees/PROJ-81"));
+
+    let applied = fx.gw(&["clean", "--yes", "--json", "--skip-provider", "github"]);
+    assert_eq!(applied.code, 0, "stderr: {}", applied.stderr);
+    let json: serde_json::Value = serde_json::from_str(&applied.stdout).expect("valid json");
+    assert_eq!(json["applied"], json!(true));
+    assert!(
+        !worktree_listed(&fx, "worktrees/PROJ-81"),
+        "the prune did not run: {json}"
+    );
+}
+
+#[test]
+fn a_dry_run_never_prunes_even_with_yes() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-82");
+    std::fs::remove_dir_all(&wt).unwrap();
+
+    let out = fx.gw(&[
+        "clean",
+        "--dry-run",
+        "--yes",
+        "--json",
+        "--skip-provider",
+        "github",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid json");
+    assert_eq!(json["applied"], json!(false));
+    assert!(json["counts"]["to_prune"].as_u64().unwrap() >= 1, "{json}");
+    assert!(
+        worktree_listed(&fx, "worktrees/PROJ-82"),
+        "a dry run pruned metadata"
+    );
+}
+
+#[test]
+fn clean_with_yes_does_not_print_the_dry_run_notice() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-83");
+    fx.publish("PROJ-83");
+
+    let out = fx.gw(&[
+        "clean",
+        "--yes",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(!out.stdout.contains("Dry run"), "{}", out.stdout);
+    assert!(!wt.exists());
+}
+
+#[test]
+fn clean_with_yes_and_nothing_to_do_does_not_claim_a_dry_run() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["clean", "--yes", "--skip-provider", "github"]);
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(!out.stdout.contains("Dry run"), "{}", out.stdout);
+}
+
+// ---- presentation and global flags -----------------------------------------
+
+#[test]
+fn no_color_strips_emoji_from_human_output() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-84");
+    fx.publish("PROJ-84");
+    commit_aged(&wt, 60);
+
+    let decorated = fx.gw(&[
+        "clean",
+        "--dry-run",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert!(decorated.stdout.contains('🔍'), "{}", decorated.stdout);
+
+    let plain = fx.gw(&[
+        "clean",
+        "--dry-run",
+        "--no-color",
+        "--skip-provider",
+        "github",
+        "--stale-days",
+        "0",
+    ]);
+    assert_eq!(plain.code, 0, "stderr: {}", plain.stderr);
+    assert!(!plain.stdout.contains('🔍'), "{}", plain.stdout);
+    // Table markers and headers are content, not decoration.
+    assert!(plain.stdout.contains("BRANCH"), "{}", plain.stdout);
+    assert!(plain.stdout.contains("ACTION"), "{}", plain.stdout);
+
+    let env = gw_with_env(
+        &fx.bare(),
+        &[
+            "clean",
+            "--dry-run",
+            "--skip-provider",
+            "github",
+            "--stale-days",
+            "0",
+        ],
+        &[("GW_REPO", fx.root.to_str().unwrap()), ("NO_COLOR", "1")],
+    );
+    assert!(
+        !env.stdout.contains('🔍'),
+        "NO_COLOR was ignored: {}",
+        env.stdout
+    );
+
+    let add = fx.gw(&["add", "PROJ-85", "--no-fetch", "--no-color"]);
+    assert!(!add.stdout.contains('✅'), "{}", add.stdout);
+    assert!(add.stdout.contains("Worktree ready at"), "{}", add.stdout);
+
+    let tmp = tempfile::tempdir().unwrap();
+    let src = source_repo(tmp.path());
+    let root = tmp.path().join("project");
+    let init = gw_raw(
+        tmp.path(),
+        &[
+            "init",
+            src.to_str().unwrap(),
+            "--dir",
+            root.to_str().unwrap(),
+            "--no-color",
+        ],
+    );
+    assert_eq!(init.code, 0, "stderr: {}", init.stderr);
+    assert!(!init.stdout.contains('🏗'), "{}", init.stdout);
+    assert!(!init.stdout.contains('✅'), "{}", init.stdout);
+    assert!(
+        init.stdout.contains("Creating worktree layout"),
+        "{}",
+        init.stdout
+    );
+    assert!(init.stdout.contains("Layout ready"), "{}", init.stdout);
+}
+
+#[test]
+fn no_color_does_not_change_json() {
+    let fx = Fixture::new();
+    let plain = fx.gw(&["clean", "--json", "--skip-provider", "github"]);
+    let stripped = fx.gw(&["clean", "--json", "--no-color", "--skip-provider", "github"]);
+    assert_eq!(plain.code, 0, "stderr: {}", plain.stderr);
+    assert_eq!(stripped.code, 0, "stderr: {}", stripped.stderr);
+    let a: serde_json::Value = serde_json::from_str(&plain.stdout).expect("valid json");
+    let b: serde_json::Value = serde_json::from_str(&stripped.stdout).expect("valid json");
+    assert_eq!(a["counts"], b["counts"]);
+    assert_eq!(
+        a["entries"].as_array().unwrap().len(),
+        b["entries"].as_array().unwrap().len()
+    );
+}
+
+#[test]
+fn the_global_json_flag_reaches_convention_show_and_explain() {
+    let fx = Fixture::new();
+    for args in [
+        &["convention", "show", "--json"][..],
+        &["--json", "convention", "show"][..],
+    ] {
+        let out = fx.gw(args);
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        serde_json::from_str::<serde_json::Value>(&out.stdout)
+            .unwrap_or_else(|e| panic!("{args:?} did not emit JSON ({e}): {:?}", out.stdout));
+    }
+    for args in [
+        &["convention", "explain", "PROJ-1", "--json"][..],
+        &["--json", "convention", "explain", "PROJ-1"][..],
+    ] {
+        let out = fx.gw(args);
+        assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+        serde_json::from_str::<serde_json::Value>(&out.stdout)
+            .unwrap_or_else(|e| panic!("{args:?} did not emit JSON ({e}): {:?}", out.stdout));
+    }
 }

@@ -10,7 +10,7 @@ gw [GLOBAL OPTIONS] <COMMAND> [OPTIONS]
 | --- | --- | --- |
 | `--repo <PATH\|SLUG>` | `GW_REPO` | Layout root, `.bare` path, or `owner/name` resolved under the repos root. |
 | `--json` | — | Force machine-readable output. |
-| `--no-color` | `NO_COLOR` | Disable color and emoji. |
+| `--no-color` | `NO_COLOR` | Remove decorative emoji from human output. JSON and table content, including the `●` and `—` markers, are unchanged. |
 | `--skip-provider <ID>` | `GW_SKIP_PROVIDERS` | Do not query this provider. Comma-separated, repeatable. |
 
 The argument parser provides `--help` and `--version`.
@@ -61,18 +61,20 @@ Make or reuse a worktree.
 | Option | Meaning |
 | --- | --- |
 | `--print-path` | Print the worktree path only. Used by the shell wrapper. Overrides `--json`. |
-| `--cd` | Change the calling shell into the worktree. This is the default with the shell integration, so the flag is only needed against `GW_CD=0`. |
+| `--cd` | Change the calling shell into the worktree. This is the default with the shell integration, so the flag is only needed against `GW_CD=0`. Standalone, it prints the path and warns on stderr. |
 | `--no-cd` | Stay in the current directory. Wins over the default, `--cd`, and `GW_CD`. The last of the `--cd` pair wins. |
 | `--no-fetch` | Do not fetch from origin first. |
 | `--json` | Machine-readable result, including whether `gw` created the worktree. |
 
 The binary cannot perform `--cd`, because a process cannot change the directory
-of its parent shell. Run standalone, `gw add --cd` prints the bare path,
-exactly like `--print-path`, and nothing else. The `gw` shell function from
-[Shell integration](#shell-integration) reads that path and changes the
-directory. That function makes `gw add` change directory by default;
-`--no-cd` turns it off, and `GW_CD=0` makes staying put the default.
-`GW_CD=1` is still accepted and means the default.
+of its parent shell. Run standalone, `gw add --cd` prints the bare path on
+stdout, exactly like `--print-path`, and warns on stderr that it cannot change
+the directory. The warning names the shell integration. The `gw` shell function
+from [Shell integration](#shell-integration) reads that path and changes the
+directory. It signals that it will do so by passing `--print-path`, so the
+warning is absent under the wrapper. That function makes `gw add` change
+directory by default; `--no-cd` turns it off, and `GW_CD=0` makes staying put
+the default. `GW_CD=1` is still accepted and means the default.
 
 `--cd` and `--no-cd` override each other, so the last one on the command line
 wins. Both override `--json` the same way that `--print-path` does, because a
@@ -109,6 +111,15 @@ continues against cached refs.
 `gw` removes a worktree only when each condition in
 [the safety rules](../explanation/clean-safety.md) is true. It never removes a
 worktree under `.claude/worktrees/`.
+
+A plan that contains only `prune` entries is real work, so `--yes` applies it
+and `--json` reports `applied: true` with `to_remove` and `to_delete` at zero.
+A prune runs one repository-wide `git worktree prune`. `--dry-run` never
+prunes, even with `--yes`.
+
+The line `Dry run — nothing changed. Re-run with --yes to apply.` prints only
+when `--yes` was not supplied. It does not print for `--dry-run --yes`, and it
+does not print when `--yes` was supplied but the plan had no work to do.
 
 After a deletion, `gw` prints `git branch <name> <tip>` for each deleted
 branch. In JSON mode, those hints go to stderr, with the other progress lines,
@@ -150,17 +161,17 @@ original at `shell/gw.sh` in the checkout.
 Print the convention in force: each rule, whether it came from the built-in
 default or a file, and whether each provider is active.
 
-| Option | Meaning |
-| --- | --- |
-| `--json` | Machine-readable result. |
+`--json` gives a machine-readable result.
 
 ## `gw convention explain <BRANCH>`
 
 Print each rule, whether it matched, and what would be queried for one branch.
 
-| Option | Meaning |
-| --- | --- |
-| `--json` | Machine-readable result. |
+`--json` gives a machine-readable result.
+
+`--json` is global, so `gw convention show --json` and
+`gw --json convention show` produce the same document. The same is true for
+`explain`.
 
 Both commands run inside a layout because the convention can differ per
 layout. See [the configuration reference](configuration.md).

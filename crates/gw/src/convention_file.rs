@@ -1,11 +1,14 @@
 //! Loading the convention from configuration files.
 //!
-//! Two files can carry configuration: `~/.gw.toml` (the user's recipes) and
-//! `<root>/.gw.toml` (one layout's specialization). They merge field by field,
-//! so a recipe can declare a provider once and each layout can narrow it.
+//! Three files can carry configuration, lowest precedence first: `~/.gw.toml`
+//! (the user's recipes), `<root>/worktrees/<default-branch>/.gw.toml` (one
+//! checkout's specialization), and `<root>/.gw.toml` (one layout's
+//! specialization). They merge field by field, so a recipe can declare a
+//! provider once and each layout can narrow it.
 //!
 //! This module only parses and merges. It does not decide which providers
-//! exist and it does not touch the network.
+//! exist, it does not touch the network, and it does not ask git which branch
+//! is the default: the caller passes that directory in.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -36,6 +39,9 @@ pub enum Origin {
     BuiltIn,
     /// The user-global file, or `GW_CONFIG`.
     Global,
+    /// `<root>/worktrees/<default-branch>/.gw.toml`.
+    #[serde(rename = "default-branch")]
+    DefaultBranch,
     /// `<root>/.gw.toml`.
     Layout,
 }
@@ -46,6 +52,7 @@ impl Origin {
         match self {
             Origin::BuiltIn => "built-in",
             Origin::Global => "global",
+            Origin::DefaultBranch => "default-branch",
             Origin::Layout => "layout",
         }
     }
@@ -138,12 +145,17 @@ pub fn load_layout_only(layout_root: &Path) -> Result<Loaded, Error> {
     Ok(loaded)
 }
 
-/// Load and merge the global and layout files.
+/// Load and merge the global, default-branch, and layout files.
 ///
-/// Precedence, highest first: the layout file, the global file (or `GW_CONFIG`),
-/// then the built-in convention. Absent fields inherit; arrays are replaced as
-/// a unit, so `ticket_rules = []` clears an inherited list.
-pub fn load(layout_root: &Path) -> Result<Loaded, Error> {
+/// Precedence, highest first: the layout file, the default-branch worktree
+/// file, the global file (or `GW_CONFIG`), then the built-in convention.
+///
+/// `default_branch_worktree` is the checkout directory for
+/// `refs/remotes/origin/HEAD`, or `None` when that ref is unset. The caller
+/// owns that lookup so this module never learns about git. An absent file at
+/// any layer is skipped silently. Absent fields inherit; arrays are replaced
+/// as a unit, so `ticket_rules = []` clears an inherited list.
+pub fn load(layout_root: &Path, default_branch_worktree: Option<&Path>) -> Result<Loaded, Error> {
     let mut loaded = Loaded {
         convention: Convention::built_in(),
         ..Loaded::default()
@@ -151,6 +163,10 @@ pub fn load(layout_root: &Path) -> Result<Loaded, Error> {
 
     let layers = [
         (explicit_or_global_path(), Origin::Global),
+        (
+            default_branch_worktree.map(|dir| dir.join(LAYOUT_FILE)),
+            Origin::DefaultBranch,
+        ),
         (Some(layout_root.join(LAYOUT_FILE)), Origin::Layout),
     ];
 
@@ -248,15 +264,15 @@ fn apply_discovery(
     let Some(table) = table else {
         return Ok(());
     };
-    if table.repos_root.is_some() && origin == Origin::Layout {
+    if table.repos_root.is_some() && matches!(origin, Origin::Layout | Origin::DefaultBranch) {
         // The repos root is what `gw` searches to *find* a layout. A layout
-        // file can only be read after its layout has been found, so a value
-        // there could never take effect. Say so rather than accept a setting
-        // that quietly does nothing.
+        // file or a default-branch worktree file can only be read after its
+        // layout has been found, so a value there could never take effect.
+        // Say so rather than accept a setting that quietly does nothing.
         return Err(Error::Usage(
-            "[discovery] repos_root belongs in the global file (~/.gw.toml), not in a \
-             layout's .gw.toml: gw searches the repos root to find layouts, so a value \
-             inside one could never take effect."
+            "[discovery] repos_root belongs in the global file (~/.gw.toml), not in the \
+             layout file or the default-branch worktree's .gw.toml: gw searches the repos \
+             root to find layouts, so a value in either file layer could never take effect."
                 .to_string(),
         ));
     }
@@ -727,7 +743,7 @@ mod coverage_tests {
         .unwrap();
 
         let _guard = EnvGuard::new(&global);
-        let loaded = load(&layout).unwrap();
+        let loaded = load(&layout, None).unwrap();
         let jira = loaded
             .providers
             .iter()
@@ -885,6 +901,113 @@ mod coverage_tests {
             "linear"
         );
         assert_eq!(loaded.sources.len(), 1);
+    }
+
+    #[test]
+    fn the_default_branch_layer_sits_between_global_and_layout() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(&global, "[clean]\nstale_after = \"3d\"\n").unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+        let default_wt = dir.path().join("worktrees/develop");
+        std::fs::create_dir_all(&default_wt).unwrap();
+        std::fs::write(
+            default_wt.join(LAYOUT_FILE),
+            "[clean]\nstale_after = \"5d\"\n",
+        )
+        .unwrap();
+        std::fs::write(layout.join(LAYOUT_FILE), "[clean]\nstale_after = \"7d\"\n").unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        let loaded = load(&layout, Some(&default_wt)).unwrap();
+        assert_eq!(loaded.clean.stale_after_secs, Some(7 * 86_400));
+        assert_eq!(loaded.clean.stale_after_origin, Origin::Layout);
+        assert_eq!(loaded.sources.len(), 3);
+        assert_eq!(loaded.sources[0], global);
+        assert_eq!(loaded.sources[1], default_wt.join(LAYOUT_FILE));
+        assert_eq!(loaded.sources[2], layout.join(LAYOUT_FILE));
+
+        // Without the layout file, the default-branch layer wins.
+        std::fs::remove_file(layout.join(LAYOUT_FILE)).unwrap();
+        let loaded = load(&layout, Some(&default_wt)).unwrap();
+        assert_eq!(loaded.clean.stale_after_origin, Origin::DefaultBranch);
+        assert_eq!(loaded.clean.stale_after_secs, Some(5 * 86_400));
+    }
+
+    #[test]
+    fn an_absent_default_branch_layer_is_skipped_silently() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(&global, "[clean]\nstale_after = \"3d\"\n").unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        // No ref resolved to a branch: the layer does not exist.
+        let loaded = load(&layout, None).unwrap();
+        assert_eq!(loaded.sources.len(), 1);
+        assert_eq!(loaded.clean.stale_after_origin, Origin::Global);
+
+        // A resolved branch whose checkout has no file is also skipped.
+        let missing = dir.path().join("worktrees/develop");
+        let loaded = load(&layout, Some(&missing)).unwrap();
+        assert_eq!(loaded.sources.len(), 1);
+        assert_eq!(loaded.clean.stale_after_origin, Origin::Global);
+    }
+
+    #[test]
+    fn an_empty_rule_list_in_the_default_branch_layer_clears_inherited_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(
+            &global,
+            "[[convention.ticket_rules]]\nprovider = \"jira\"\nselector = \"embedded\"\npattern = \"x\"\n",
+        )
+        .unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+        let default_wt = dir.path().join("worktrees/develop");
+        std::fs::create_dir_all(&default_wt).unwrap();
+        std::fs::write(
+            default_wt.join(LAYOUT_FILE),
+            "[convention]\nticket_rules = []\n",
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        let loaded = load(&layout, Some(&default_wt)).unwrap();
+        assert!(loaded.convention.ticket_rules.is_empty());
+        assert_eq!(loaded.ticket_rules_origin, Origin::DefaultBranch);
+    }
+
+    #[test]
+    fn the_default_branch_origin_has_a_stable_name() {
+        assert_eq!(Origin::DefaultBranch.as_str(), "default-branch");
+        assert_eq!(
+            serde_json::to_string(&Origin::DefaultBranch).unwrap(),
+            "\"default-branch\""
+        );
+    }
+
+    #[test]
+    fn a_repos_root_in_the_default_branch_layer_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(&global, "").unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+        let default_wt = dir.path().join("worktrees/develop");
+        std::fs::create_dir_all(&default_wt).unwrap();
+        std::fs::write(
+            default_wt.join(LAYOUT_FILE),
+            "[discovery]\nrepos_root = \"~/elsewhere\"\n",
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        let error = load(&layout, Some(&default_wt)).unwrap_err();
+        assert!(error.to_string().contains("global file"), "{error}");
     }
 
     /// Point `GW_CONFIG` at one file for the duration of a test.

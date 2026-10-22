@@ -1,30 +1,53 @@
 # Configuration reference
 
-Configuration has three levels: command-line flags and their environment
-bindings, a per-layout file, and a user-global file. Precedence is highest
-first:
+Configuration resolves from five sources. Precedence is highest first:
 
-1. command-line flag (or the environment variable that binds to it)
-2. `<root>/.gw.toml` — the layout file
-3. `~/.gw.toml` — the user-global file, or the file named by `GW_CONFIG`
-4. the built-in convention
+| Rank | Source | How it is resolved |
+| --- | --- | --- |
+| 1 | Command-line flag | clap. `--stale-days`, `--skip-provider`, `--no-color`, `--json`, `--repo`. |
+| 2 | Environment bound to a flag | `GW_STALE_DAYS`, `GW_SKIP_PROVIDERS`, `NO_COLOR`, `GW_REPO`. Also the unbound `GW_JIRA_BASE_URL` and `GW_PROTECT`. |
+| 3 | `<root>/.gw.toml` | The layout file. Read whenever it exists. |
+| 4 | `<root>/worktrees/<default-branch>/.gw.toml` | Read only when `refs/remotes/origin/HEAD` resolves and the file exists. |
+| 5 | `~/.gw.toml`, or the file named by `GW_CONFIG` | The global file. |
+| base | Built-in convention and defaults | `Convention::built_in()` and `Policy::default()`. |
+
+`GW_CONFIG` and `GW_NO_GLOBAL_CONFIG` select a file. They are not layers:
+
+- `GW_CONFIG`, when set, *is* the file in slot 5. It replaces `~/.gw.toml`; it
+  does not outrank the layout or default-branch files.
+- `GW_NO_GLOBAL_CONFIG`, when set and `GW_CONFIG` is unset, removes slot 5. It
+  does not remove slots 3 or 4.
+- If both are set, `GW_CONFIG` wins.
 
 There is exactly one way to configure a provider or a rule: `[convention]`.
 No shorthand table exists beside it, so two files can never disagree about
 where a value comes from. Three further tables configure the behavior around
 conventions: `[clean]`, `[providers]`, and `[discovery]`.
 
-## The two files
+## The three files
 
 | File | Scope | Purpose |
 | --- | --- | --- |
 | `~/.gw.toml` | Every layout on the machine | A recipe: the tools you use and how your branches name tickets. |
+| `<root>/worktrees/<default-branch>/.gw.toml` | One checkout of the default branch | A specialization carried with the repository. |
 | `<root>/.gw.toml` | One layout | A specialization: a project list, a different pattern, a different base URL. |
 
-Both sit outside a checkout, so neither is committed with the work. Put the
-layout file at the layout root, beside `.bare`.
+The default-branch file is the one place a checkout's configuration can be
+committed. Put the layout file at the layout root, beside `.bare`.
 
-Credentials never go in either file. They go in the environment.
+`<default-branch>` comes only from `refs/remotes/origin/HEAD`, resolved
+through git. If that ref is unset or unreadable, `gw` skips the layer
+silently. It is never guessed from `HEAD` or a branch name.
+
+**Trust assumption.** A `.gw.toml` committed in the default branch is
+repository content, and `gw` trusts it. That file may declare everything,
+including `[convention.providers.<id>] kind = "command"`, which runs a local
+program with your permissions, and `base_url`, which decides where JIRA
+credentials are sent. It may also shorten `[clean] stale_after`, which makes an
+interactive `gw clean` more aggressive. Review a `.gw.toml` in a repository you
+clone the same way you review any other code that runs on your machine.
+
+Credentials never go in a file. They go in the environment.
 
 ## How the files merge
 
@@ -33,11 +56,12 @@ The files merge field by field, not file by file:
 | Value | Rule |
 | --- | --- |
 | A scalar (`base_url`, `done_status_category`, `strength`, `stale_after`, `repos_root`) | The higher level wins. |
-| A provider table | Merged field by field under the same provider name. |
+| A provider table | Merged field by field under the same provider name, across all three files. |
 | `ticket_rules`, `change_rules`, `protect`, `skip` | The higher level **replaces** the list when it declares one, and inherits the lower level's list when it does not. `[]` explicitly clears the list. |
 
 This is what makes a recipe useful: the global file declares the tools once,
-and each layout states only what differs for it.
+and each layout states only what differs for it. The default-branch file sits
+between them and follows the same rules.
 
 ## `[convention]`
 
@@ -137,9 +161,14 @@ skip = ["jira"]
 ```
 
 `skip` names providers that this layout does not query. It is the file spelling
-of `--skip-provider` and `GW_SKIP_PROVIDERS`. Skips are **additive**: the
-invocation's skips and the file's skips are combined, so a flag can silence one
-more provider without the shared file repeating it.
+of `--skip-provider` and `GW_SKIP_PROVIDERS`. A non-empty flag or environment
+list **replaces** the file list. An absent or empty flag list inherits the file
+list. The replacement is fail-closed: skipping suppresses queries, so
+re-enabling a provider can only add observations, and an observation that
+fails is `unknown`, which blocks destruction.
+
+`gw convention show --json` reports the file list in `settings.skip` and the
+effective list after replacement in `providers[].active`.
 
 This table is not `[convention.providers]`. `[convention.providers.<id>]`
 *declares* a provider; `[providers] skip` *leaves one out* of the run.
@@ -157,8 +186,9 @@ repos_root = "~/work/repos"
 
 This key belongs in the **global** file only. `gw` searches the repos root to
 find a layout, so it must read this value before it can find the layout file.
-A `[discovery] repos_root` inside a layout's `.gw.toml` is a usage error
-(exit 2), not a setting that silently does nothing.
+A `[discovery] repos_root` inside a layout's `.gw.toml`, or inside the
+default-branch file, is a usage error (exit 2), not a setting that silently
+does nothing.
 
 ## `gw convention show`
 
@@ -182,10 +212,10 @@ names it. A value from a flag or a variable wins over the file.
 | Variable | File key | Meaning | Default |
 | --- | --- | --- | --- |
 | `GW_STALE_DAYS` | `[clean] stale_after` | Stale limit. The variable is whole days; the file accepts a duration such as `"5w"`. | `7d` |
-| `GW_PROTECT` | `[clean] protect` | Branch names that `gw` must never delete. The variable is comma-separated. | — |
-| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. | — |
+| `GW_PROTECT` | `[clean] protect` | Branch names that `gw` must never delete. The variable is comma-separated. It **adds** to the file list and never removes a name. An invalid non-empty name is a usage error (exit 2). | — |
+| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. A non-empty list replaces the file list. | — |
 | `GW_REPOS_ROOT` | `[discovery] repos_root` | Directory that holds layouts. `gw` expands a leading `~/` in either form. | `~/repos` |
-| `GW_JIRA_BASE_URL` | `[convention.providers.jira] base_url` | JIRA base URL. The file wins when both are set. | — |
+| `GW_JIRA_BASE_URL` | `[convention.providers.jira] base_url` | JIRA base URL. The environment wins when both are set. An empty value falls back to the file. A `jira` provider entry must still exist. | — |
 
 These variables have no file spelling, by design:
 
@@ -195,7 +225,7 @@ These variables have no file spelling, by design:
 | `GW_REPO` | A per-invocation locator. `gw` must resolve it before it can find the layout, and therefore before it can read the layout file. |
 | `GW_CONFIG`, `GW_NO_GLOBAL_CONFIG` | They select which configuration file to read, so they cannot be stored inside one. |
 | `GW_CD` | Read by the shell integration in `shell/gw.sh`, not by the `gw` binary. `0` makes `gw add` stay in the current directory; `1` is the default behavior and enters the worktree. |
-| `NO_COLOR` | Presentation only. It never changes a decision or the JSON shape, so a team has nothing to agree on. The flag is `--no-color`. |
+| `NO_COLOR` | Presentation only. It removes decorative emoji from human output. It never changes a decision, a table marker, or the JSON shape. The flag is `--no-color`. |
 
 `GW_REPOS_ROOT` and `[discovery] repos_root` are the same setting. The file
 form works only in the global file, for the same reason `GW_REPO` cannot be in
@@ -209,8 +239,12 @@ a file: the repos root is part of how `gw` finds a layout.
 - the branch that the `HEAD` of the bare repository checks out
 - each branch that a worktree checks out
 
-`[clean] protect` and `GW_PROTECT` add more branches. Both are additive, so one
-source can never remove protection that another declared. `gw` never deletes a
+`[clean] protect` and `GW_PROTECT` add more branches. The three files replace
+the list as a unit, the same as every other list-valued setting. `GW_PROTECT`
+is the deliberate exception: it is a monotone safety set, so it adds to the
+resolved file list and never removes a name. A wrapper that exports
+`GW_PROTECT=hotfix` must not silently unprotect a `release` that the layout
+declared. To drop a file's protection, edit that file. `gw` never deletes a
 protected branch.
 Worktree removal has narrower protection. Only the default branch and the bare
 `HEAD` are protected from removal, because otherwise `gw` could never remove a

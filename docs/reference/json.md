@@ -136,9 +136,9 @@ previous meaning and describe the primary (identity-strength) observation.
 | `created` | boolean | `false` when `gw` reused an existing worktree. |
 
 `--print-path` overrides `--json`. It prints the bare path and nothing else,
-because the shell wrapper uses that contract. `--cd` does the same, because the
-shell function that changes the directory must receive the path and nothing
-else.
+because the shell wrapper uses that contract. `--cd` does the same: the path is
+the only line on stdout. Standalone, `--cd` may also print a warning on stderr
+that it cannot change the caller's directory.
 
 ## `gw init --json`
 
@@ -196,8 +196,10 @@ else.
 ```
 
 `applied` is `false` when the document is a plan and `true` when the plan ran.
-A script uses `applied` to tell a dry run from a destructive run. Do not infer
-this value from flags or from the exit code.
+A script uses `applied` to tell a plan from a run. Do not infer this value from
+flags or from the exit code. It means "the plan ran", not "something was
+destroyed": a prune-only plan can be `applied: true` with `to_remove` and
+`to_delete` both zero.
 
 `target.kind` is `worktree` or `branch`.
 
@@ -263,14 +265,18 @@ or `resolution`) with `reason`.
     "repos_root": null,
     "repos_root_origin": "built-in"
   },
-  "sources": ["/home/me/.gw.toml", "/home/me/repos/acme/widgets/.gw.toml"]
+  "sources": [
+    "/home/me/.gw.toml",
+    "/home/me/repos/acme/widgets/worktrees/main/.gw.toml",
+    "/home/me/repos/acme/widgets/.gw.toml"
+  ]
 }
 ```
 
 | Field | Type | Notes |
 | --- | --- | --- |
 | `ticket_rules` | array | In evaluation order. |
-| `ticket_rules_origin` | string | `built-in`, `global`, or `layout`. |
+| `ticket_rules_origin` | string | `built-in`, `global`, `default-branch`, or `layout`. |
 | `change_rules` | array | In evaluation order. |
 | `change_rules_origin` | string | Same values as above. |
 | `providers` | array | Each provider, whether it is active, and why not. |
@@ -284,11 +290,11 @@ The object is additive; adding it changed no existing field.
 | Field | Type | Notes |
 | --- | --- | --- |
 | `stale_after_secs` | integer | The limit that will be used, after precedence. Never `null`. |
-| `stale_after_origin` | string | Where it came from. `built-in` when no file set one. |
+| `stale_after_origin` | string | Where it came from: `built-in`, `global`, `default-branch`, or `layout`. |
 | `protect` | array | Extra protected branches from the files. |
-| `protect_origin` | string | Where the list came from. |
-| `skip` | array | Providers the files ask to skip. |
-| `skip_origin` | string | Where the list came from. |
+| `protect_origin` | string | Where the list came from: `global`, `default-branch`, or `layout`. |
+| `skip` | array | Providers the files ask to skip. This is the file layer; `providers[].active` reflects a flag or environment override. |
+| `skip_origin` | string | Where the file list came from. |
 | `repos_root` | string or null | The configured repos root, when the global file sets one. |
 | `repos_root_origin` | string | Where it came from. |
 

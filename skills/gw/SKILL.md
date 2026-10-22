@@ -132,7 +132,8 @@ Safety rules for agents:
   `--print-path` and capture stdout only.
 - A bare `gw add` changes directory only in an interactive shell that sourced
   the integration. A non-interactive tool call gets no navigation, so use
-  `--print-path` instead.
+  `--print-path` instead. Standalone `--cd` prints the path on stdout and warns
+  on stderr.
 - Some releases print a human progress line to stdout before the
   `gw clean --json` document. If `jq` cannot parse the stream, strip
   everything before the first `{`:

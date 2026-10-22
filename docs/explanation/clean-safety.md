@@ -15,7 +15,7 @@ That order is the policy, not an implementation detail.
 | 1 | Harness worktree | Skip | An agent harness owns it. |
 | 2 | No branch (detached `HEAD`) | Skip | `gw` does not manage detached `HEAD`. |
 | 3 | Protected: the default branch, or the bare `HEAD` | Keep | Never destroy the repository's main line. |
-| 4 | Prunable: git reports the directory is gone | Prune the metadata | No checkout exists to lose. |
+| 4 | Prunable: git reports the directory is gone | Prune the metadata | No checkout exists to lose. Applying a prune runs one repository-wide `git worktree prune`, which may also drop metadata for an entry classified Keep or Skip. That is metadata only: no ref and no directory is deleted. |
 | 5 | Unreadable `HEAD` | Keep | An unknown state is not an empty state. |
 | 6 | Unpublished commits | Keep | Some commit is reachable from no remote. |
 | 7 | Uncommitted changes, or an unreadable status | Keep | The work exists only here. |
@@ -93,7 +93,9 @@ To apply a plan, you need an explicit opt-in:
 - otherwise, the plan applies only when stdout is a terminal
 
 A piped or scripted run therefore stays a dry run unless it gives `--yes`. The
-default follows whether a human is present to watch the run.
+default follows whether a human is present to watch the run. The gate admits a
+plan with any planned work, including a prune-only plan that destroys nothing.
+The `Dry run — nothing changed` notice prints only when `--yes` was absent.
 
 `--json` counts as "no human present", even when stdout is a terminal. An agent
 harness can allocate a pty, and a terminal is not proof that someone is
