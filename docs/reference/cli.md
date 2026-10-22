@@ -101,8 +101,8 @@ Remove worktrees and delete branches.
 | `--yes`, `-y` | — | Apply without a prompt. |
 | `--closed` | — | Also remove worktrees whose ticket is closed. |
 | `--delete-branches` | — | Also delete stale orphan branches that are fully published. |
+| `--interactive`, `-i` | — | Choose the worktrees to act on from a list. Needs a terminal. |
 | `--stale-days <N>` | `GW_STALE_DAYS` | Stale limit in days. Overrides `[clean] stale_after`. Default 7. |
-
 | `--json` | — | Machine-readable plan, with `applied` to say whether it ran. |
 
 The command fetches with prune first. A fetch failure prints a warning and
@@ -120,6 +120,25 @@ prunes, even with `--yes`.
 The line `Dry run — nothing changed. Re-run with --yes to apply.` prints only
 when `--yes` was not supplied. It does not print for `--dry-run --yes`, and it
 does not print when `--yes` was supplied but the plan had no work to do.
+
+`--interactive` prints the plan table, then shows a list of the rows that can
+be acted on. Only the rows that you mark are applied. The list contains rows
+whose action is `remove`, `prune`, or `delete`, and worktrees that `--closed`
+would remove. You do not need `--closed`. Rows that `gw` keeps or skips (for
+example protected, dirty, unpublished, or recently active) show in the table
+and are not in the list. You cannot select them. A prune row runs the
+repository-wide `git worktree prune`, so it drops all prunable metadata.
+
+`--interactive` exits with code 2 in these cases:
+
+- `--yes` is given
+- `--json` is given
+- stdin or stdout is not a terminal
+- `--delete-branches` is given
+
+With `--dry-run`, `--interactive` prints the table and a notice, shows no list,
+and changes nothing. It still needs a terminal. Esc, or an empty selection,
+prints `Nothing selected — nothing changed.` and exits with code 0.
 
 After a deletion, `gw` prints `git branch <name> <tip>` for each deleted
 branch. In JSON mode, those hints go to stderr, with the other progress lines,

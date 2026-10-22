@@ -313,6 +313,48 @@ fn clean_removes_a_clean_published_worktree() {
 }
 
 #[test]
+fn clean_interactive_conflicts_with_yes() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-20");
+    fx.publish("PROJ-20");
+
+    let out = fx.gw(&["clean", "--interactive", "--yes", "--stale-days", "0"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(wt.is_dir(), "a rejected invocation removed a worktree");
+}
+
+#[test]
+fn clean_interactive_rejects_json() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-21");
+    fx.publish("PROJ-21");
+
+    let out = fx.gw(&["clean", "--interactive", "--json", "--stale-days", "0"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stdout.is_empty(), "stdout: {}", out.stdout);
+    assert!(wt.is_dir());
+}
+
+#[test]
+fn clean_interactive_without_a_terminal_is_a_usage_error_not_a_dry_run() {
+    let fx = Fixture::new();
+    let wt = fx.add_worktree("PROJ-22");
+    fx.publish("PROJ-22");
+
+    let out = fx.gw(&["clean", "--interactive", "--stale-days", "0"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+    assert!(out.stderr.contains("terminal"), "stderr: {}", out.stderr);
+    assert!(wt.is_dir(), "a rejected invocation removed a worktree");
+}
+
+#[test]
+fn clean_interactive_rejects_delete_branches() {
+    let fx = Fixture::new();
+    let out = fx.gw(&["clean", "--interactive", "--delete-branches"]);
+    assert_eq!(out.code, 2, "stderr: {}", out.stderr);
+}
+
+#[test]
 fn clean_never_touches_the_default_branch_worktree() {
     let fx = Fixture::new();
     let develop = fx.root.join("worktrees/develop");

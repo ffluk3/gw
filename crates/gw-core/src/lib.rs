@@ -13,6 +13,7 @@ pub mod layout;
 pub mod model;
 pub mod policy;
 pub mod render;
+pub mod select;
 pub mod snapshot;
 
 pub use convention::{
@@ -24,6 +25,7 @@ pub use duration::{format_duration_secs, parse_duration_secs};
 pub use layout::Layout;
 pub use model::{BranchName, ModelError, Sha, TicketId};
 pub use policy::Policy;
+pub use select::{apply_selection, is_selectable, SelectionError};
 pub use snapshot::{
     Activity, ActivitySource, BranchSnapshot, ChangeObservation, ChangeState, Dirty, ReachableSet,
     RepoSnapshot, TicketObservation, TicketStatus, WorktreeKind, WorktreeSnapshot,

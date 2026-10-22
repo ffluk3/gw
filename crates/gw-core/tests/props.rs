@@ -6,10 +6,12 @@
 
 use gw_core::classify::classify_clean;
 use gw_core::{
-    Activity, ActivitySource, BranchName, BranchSnapshot, ChangeObservation, ChangeState, Decision,
-    Dirty, Layout, Policy, ProviderId, ReachableSet, RepoSnapshot, Sha, Strength, Target, TicketId,
-    TicketObservation, TicketStatus, WorktreeKind, WorktreeSnapshot,
+    apply_selection, Activity, ActivitySource, BranchName, BranchSnapshot, ChangeObservation,
+    ChangeState, Decision, Dirty, Layout, Policy, ProviderId, ReachableSet, RepoSnapshot,
+    SelectionError, Sha, Strength, Target, TicketId, TicketObservation, TicketStatus, WorktreeKind,
+    WorktreeSnapshot,
 };
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 
 /// Small deterministic generator: enough entropy to explore interactions, and
@@ -446,6 +448,98 @@ fn closed_tickets_are_only_removed_when_opted_in() {
             }
         }
     }
+}
+
+#[test]
+fn an_interactive_selection_never_names_a_keep_or_skip_target() {
+    for seed in 0u64..200 {
+        for pi in 0..policy().len() {
+            let (_, plan) = run(seed, DAY, pi);
+            let mut rng = Rng(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+
+            // (1) A protected row fails alone and mixed into any subset.
+            for (i, (_, decision)) in plan.entries.iter().enumerate() {
+                if !matches!(decision, Decision::Keep { .. } | Decision::Skip { .. }) {
+                    continue;
+                }
+                let alone: BTreeSet<usize> = [i].into_iter().collect();
+                assert_eq!(
+                    apply_selection(&plan, &alone),
+                    Err(SelectionError::NotSelectable { index: i }),
+                    "seed={seed} policy={pi} picked a Keep/Skip row alone"
+                );
+                let mut mixed: BTreeSet<usize> =
+                    (0..plan.entries.len()).filter(|_| rng.bool()).collect();
+                mixed.insert(i);
+                assert!(
+                    apply_selection(&plan, &mixed).is_err(),
+                    "seed={seed} policy={pi} a Keep/Skip row slipped into a subset"
+                );
+            }
+
+            // (2) Picking everything offered yields only real work.
+            let all: BTreeSet<usize> = plan.selectable_indices().into_iter().collect();
+            let out = apply_selection(&plan, &all).expect("selectable rows are accepted");
+            assert_eq!(out.entries.len(), all.len());
+            for ((target, decision), index) in out.entries.iter().zip(&all) {
+                assert!(
+                    matches!(
+                        decision,
+                        Decision::Remove { .. } | Decision::Prune { .. } | Decision::Delete { .. }
+                    ),
+                    "seed={seed} policy={pi} selection produced {decision:?}"
+                );
+                // (3) Nothing is invented: the target and any tip came from the input.
+                let source = &plan.entries[*index];
+                assert_eq!(&source.0, target);
+                match (&source.1, decision) {
+                    (Decision::Delete { tip: a, .. }, Decision::Delete { tip: b, .. }) => {
+                        assert_eq!(a, b, "seed={seed} policy={pi} tip changed");
+                    }
+                    // (4) Remove only comes from Remove or Recommend.
+                    (
+                        Decision::Remove { .. } | Decision::Recommend { .. },
+                        Decision::Remove { .. },
+                    ) => {}
+                    (Decision::Prune { .. }, Decision::Prune { .. }) => {}
+                    (from, to) => {
+                        panic!("seed={seed} policy={pi} {from:?} became {to:?} through selection")
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn a_closed_ticket_without_opt_in_is_selectable_but_a_dirty_one_is_not() {
+    let closed = || {
+        vec![ticket(
+            Strength::Identity,
+            TicketStatus::Closed {
+                resolution: Some("Done".into()),
+            },
+        )]
+    };
+    let policy = Policy::default();
+
+    let mut fresh = clean_stale_worktree(closed(), vec![]);
+    fresh.activity.age_secs = DAY;
+    let plan = classify_clean(&snapshot_with(fresh), &policy);
+    assert!(plan.entries[0].1.is_recommendation());
+    let picked: BTreeSet<usize> = [0].into_iter().collect();
+    let out = apply_selection(&plan, &picked).expect("recommendation is selectable");
+    assert!(matches!(out.entries[0].1, Decision::Remove { .. }));
+
+    let mut dirty = clean_stale_worktree(closed(), vec![]);
+    dirty.activity.age_secs = DAY;
+    dirty.dirty = Dirty::Dirty;
+    let plan = classify_clean(&snapshot_with(dirty), &policy);
+    assert!(plan.selectable_indices().is_empty());
+    assert_eq!(
+        apply_selection(&plan, &picked),
+        Err(SelectionError::NotSelectable { index: 0 })
+    );
 }
 
 // ---- convention and provider evidence --------------------------------------
