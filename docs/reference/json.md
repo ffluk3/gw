@@ -292,7 +292,7 @@ The object is additive; adding it changed no existing field.
 | `stale_after_secs` | integer | The limit that will be used, after precedence. Never `null`. |
 | `stale_after_origin` | string | Where it came from: `built-in`, `global`, `default-branch`, or `layout`. |
 | `protect` | array | Extra protected branches from the files. |
-| `protect_origin` | string | Where the list came from: `global`, `default-branch`, or `layout`. |
+| `protect_origin` | string | Where the list came from: `built-in`, `global`, `default-branch`, or `layout`. |
 | `skip` | array | Providers the files ask to skip. This is the file layer; `providers[].active` reflects a flag or environment override. |
 | `skip_origin` | string | Where the file list came from. |
 | `repos_root` | string or null | The configured repos root, when the global file sets one. |

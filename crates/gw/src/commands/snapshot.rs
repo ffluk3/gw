@@ -608,7 +608,7 @@ mod coverage_tests {
             },
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("host").unwrap(),
-                kind: "command".into(),
+                kind: Some("command".into()),
                 base_url: None,
                 done_status_category: None,
                 command: Some(vec!["/definitely/not-a-real-binary".into()]),

@@ -62,7 +62,7 @@ impl Context {
             loaded,
             registry,
             json: cli.json,
-            no_color: cli.no_color,
+            no_color: cli.color_disabled(),
         })
     }
 
@@ -99,7 +99,9 @@ impl Context {
         self.json
     }
 
-    /// A decorative glyph, or nothing when `--no-color`/`NO_COLOR` is set.
+    /// A decorative glyph, or nothing when decoration is disabled.
+    ///
+    /// That is `--no-color`, or `NO_COLOR` present and non-empty.
     ///
     /// The trailing space belongs to the glyph so plain output has no gap left
     /// behind. Table markers (`●`, `—`) are content, not decoration, and never
@@ -120,20 +122,34 @@ fn default_branch_layer(layout: &Layout, branch: Option<&gw_core::BranchName>) -
 
 /// Providers to leave out of this run, rejecting invalid slugs.
 ///
-/// A non-empty `--skip-provider`/`GW_SKIP_PROVIDERS` replaces `[providers]
-/// skip` from the files; an absent or empty flag list inherits the file list.
-/// Replacement is fail-closed: skipping suppresses queries, so re-enabling a
-/// provider can only add observations, and an observation that fails is
-/// `Unknown`, which blocks destruction.
+/// `--skip-provider`/`GW_SKIP_PROVIDERS` replaces `[providers] skip` from the
+/// files when at least one entry is non-empty after trimming. If the flag is
+/// absent, or every entry is empty, the file list applies.
+///
+/// Replacement is the user's explicit per-invocation choice, not a safety
+/// guarantee. A provider that a layout skipped because it is not authoritative
+/// there can answer once it is re-enabled, and that answer can change a
+/// verdict. Skipping only withholds observations; it does not make them safer.
 fn skip_providers(cli: &Cli, loaded: &crate::convention_file::Loaded) -> Vec<ProviderId> {
-    let selected = if cli.skip_provider.is_empty() {
-        &loaded.provider_selection.skip
+    let flag: Vec<&str> = cli
+        .skip_provider
+        .iter()
+        .map(|raw| raw.trim())
+        .filter(|raw| !raw.is_empty())
+        .collect();
+    let selected: Vec<&str> = if flag.is_empty() {
+        loaded
+            .provider_selection
+            .skip
+            .iter()
+            .map(|raw| raw.trim())
+            .collect()
     } else {
-        &cli.skip_provider
+        flag
     };
     selected
-        .iter()
-        .filter_map(|raw| ProviderId::parse(raw.trim()).ok())
+        .into_iter()
+        .filter_map(|raw| ProviderId::parse(raw).ok())
         .collect()
 }
 
@@ -248,6 +264,29 @@ mod coverage_tests {
         let skipped = skip_providers(&cli, &loaded);
         assert_eq!(skipped.len(), 1);
         assert_eq!(skipped[0].as_str(), "github");
+    }
+
+    #[test]
+    fn an_explicitly_empty_flag_list_inherits_the_file_list() {
+        // `--skip-provider ""` reaches clap as one empty entry. It must not
+        // count as a replacement that clears the file list.
+        let cli = Cli {
+            repo: None,
+            json: false,
+            no_color: false,
+            skip_provider: vec!["".into(), "   ".into()],
+            command: Command::Status(crate::cli::StatusArgs {}),
+        };
+        let loaded = crate::convention_file::Loaded {
+            provider_selection: crate::convention_file::ProviderSelection {
+                skip: vec!["jira".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let skipped = skip_providers(&cli, &loaded);
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].as_str(), "jira");
     }
 
     #[test]

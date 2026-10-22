@@ -475,7 +475,7 @@ mod coverage_tests {
     fn command_provider(kind: &str) -> ProviderConfig {
         ProviderConfig {
             id: ProviderId::parse("host").unwrap(),
-            kind: kind.into(),
+            kind: Some(kind.into()),
             base_url: None,
             done_status_category: None,
             command: Some(vec!["tool".into()]),

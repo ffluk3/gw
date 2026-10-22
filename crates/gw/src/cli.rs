@@ -46,8 +46,9 @@ pub struct Cli {
     /// Strip decorative emoji from human output.
     ///
     /// JSON documents and table content, including the `●` and `—` markers,
-    /// are unaffected.
-    #[arg(long, global = true, env = "NO_COLOR")]
+    /// are unaffected. `NO_COLOR` set to any non-empty value has the same
+    /// effect; an empty value does not.
+    #[arg(long, global = true)]
     pub no_color: bool,
 
     /// Do not query this provider. Repeatable.
@@ -65,6 +66,25 @@ pub struct Cli {
 
     #[command(subcommand)]
     pub command: Command,
+}
+
+impl Cli {
+    /// Whether decorative output is disabled for this run.
+    ///
+    /// `--no-color` always disables. `NO_COLOR` disables when it is present and
+    /// non-empty, whatever the value: [no-color.org][spec] treats even `0` as
+    /// "set". An empty or unset value does not disable.
+    ///
+    /// This is read outside clap deliberately. Binding `NO_COLOR` to a `bool`
+    /// arg makes clap parse the value as a boolean, so `NO_COLOR=1` and
+    /// `NO_COLOR=0` become usage errors instead of a request to disable
+    /// decoration.
+    ///
+    /// [spec]: https://no-color.org/
+    #[must_use]
+    pub fn color_disabled(&self) -> bool {
+        self.no_color || std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty())
+    }
 }
 
 #[derive(Debug, Subcommand)]

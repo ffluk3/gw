@@ -362,7 +362,7 @@ mod tests {
         let missing_url = crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: None,
                 done_status_category: None,
                 command: None,
@@ -375,7 +375,7 @@ mod tests {
         let configured = crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: Some("https://example.atlassian.net/".into()),
                 done_status_category: None,
                 command: None,
@@ -389,7 +389,7 @@ mod tests {
         crate::convention_file::Loaded {
             providers: vec![crate::convention_file::ProviderConfig {
                 id: ProviderId::parse("jira").unwrap(),
-                kind: "jira".into(),
+                kind: Some("jira".into()),
                 base_url: base_url.map(str::to_string),
                 done_status_category: None,
                 command: None,

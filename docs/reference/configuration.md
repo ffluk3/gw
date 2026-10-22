@@ -161,11 +161,16 @@ skip = ["jira"]
 ```
 
 `skip` names providers that this layout does not query. It is the file spelling
-of `--skip-provider` and `GW_SKIP_PROVIDERS`. A non-empty flag or environment
-list **replaces** the file list. An absent or empty flag list inherits the file
-list. The replacement is fail-closed: skipping suppresses queries, so
-re-enabling a provider can only add observations, and an observation that
-fails is `unknown`, which blocks destruction.
+of `--skip-provider` and `GW_SKIP_PROVIDERS`. A flag or environment list with
+at least one non-empty entry **replaces** the file list. Entries that are empty
+after trimming are ignored. If the list is absent, or every entry is empty, the
+file list applies.
+
+Replacement is the user's explicit choice for that invocation. It is not a
+safety argument: a provider that a layout skipped because it is not
+authoritative there can answer once it is re-enabled, and that answer can
+change a verdict. Skipping withholds observations; it does not make them
+safer.
 
 `gw convention show --json` reports the file list in `settings.skip` and the
 effective list after replacement in `providers[].active`.
@@ -213,7 +218,7 @@ names it. A value from a flag or a variable wins over the file.
 | --- | --- | --- | --- |
 | `GW_STALE_DAYS` | `[clean] stale_after` | Stale limit. The variable is whole days; the file accepts a duration such as `"5w"`. | `7d` |
 | `GW_PROTECT` | `[clean] protect` | Branch names that `gw` must never delete. The variable is comma-separated. It **adds** to the file list and never removes a name. An invalid non-empty name is a usage error (exit 2). | — |
-| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. A non-empty list replaces the file list. | — |
+| `GW_SKIP_PROVIDERS` | `[providers] skip` | Providers to leave out of the run. Comma-separated on the variable. A list with at least one non-empty entry replaces the file list; empty entries are ignored, and an all-empty list inherits the files. | — |
 | `GW_REPOS_ROOT` | `[discovery] repos_root` | Directory that holds layouts. `gw` expands a leading `~/` in either form. | `~/repos` |
 | `GW_JIRA_BASE_URL` | `[convention.providers.jira] base_url` | JIRA base URL. The environment wins when both are set. An empty value falls back to the file. A `jira` provider entry must still exist. | — |
 
@@ -225,7 +230,7 @@ These variables have no file spelling, by design:
 | `GW_REPO` | A per-invocation locator. `gw` must resolve it before it can find the layout, and therefore before it can read the layout file. |
 | `GW_CONFIG`, `GW_NO_GLOBAL_CONFIG` | They select which configuration file to read, so they cannot be stored inside one. |
 | `GW_CD` | Read by the shell integration in `shell/gw.sh`, not by the `gw` binary. `0` makes `gw add` stay in the current directory; `1` is the default behavior and enters the worktree. |
-| `NO_COLOR` | Presentation only. It removes decorative emoji from human output. It never changes a decision, a table marker, or the JSON shape. The flag is `--no-color`. |
+| `NO_COLOR` | Presentation only. When it is present and non-empty, it removes decorative emoji from human output, whatever the value (including `0`), per [no-color.org](https://no-color.org/). An empty or unset value does not disable decoration, and no value causes a usage error. It never changes a decision, a table marker, or the JSON shape. The flag is `--no-color`. |
 
 `GW_REPOS_ROOT` and `[discovery] repos_root` are the same setting. The file
 form works only in the global file, for the same reason `GW_REPO` cannot be in

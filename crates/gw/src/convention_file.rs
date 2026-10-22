@@ -62,7 +62,13 @@ impl Origin {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProviderConfig {
     pub id: ProviderId,
-    pub kind: String,
+    /// The declared adapter kind, or `None` when no layer declared one.
+    ///
+    /// `None` means "use the provider id", which is the documented default. It
+    /// stays optional through the merge so a higher layer that sets only, say,
+    /// `base_url` cannot reset a lower layer's `kind = "command"` back to the
+    /// id and silently deactivate the provider.
+    pub kind: Option<String>,
     pub base_url: Option<String>,
     pub done_status_category: Option<String>,
     /// For `kind = "command"`: the executable and its fixed arguments.
@@ -70,9 +76,19 @@ pub struct ProviderConfig {
 }
 
 impl ProviderConfig {
+    /// The adapter kind in force: the declared one, or the provider id.
+    #[must_use]
+    pub fn kind(&self) -> &str {
+        self.kind.as_deref().unwrap_or_else(|| self.id.as_str())
+    }
+
     /// Merge a higher-precedence declaration over this one, field by field.
     fn merge(&mut self, higher: Self) {
-        self.kind = higher.kind;
+        // An absent field inherits. `kind` is the case that matters: defaulting
+        // it to the id here would overwrite a lower layer's explicit kind.
+        if higher.kind.is_some() {
+            self.kind = higher.kind;
+        }
         if higher.base_url.is_some() {
             self.base_url = higher.base_url;
         }
@@ -457,10 +473,9 @@ enum CommandValue {
 
 impl ProviderTable {
     fn into_config(self, id: ProviderId) -> ProviderConfig {
-        let kind = self.kind.unwrap_or_else(|| id.as_str().to_string());
         ProviderConfig {
             id,
-            kind,
+            kind: self.kind,
             base_url: self.base_url,
             done_status_category: self.done_status_category,
             command: self.command.map(|c| match c {
@@ -670,7 +685,7 @@ mod tests {
         let table: ProviderTable =
             toml::from_str("kind = \"command\"\ncommand = \"tool --json\"\n").unwrap();
         let config = table.into_config(ProviderId::parse("linear").unwrap());
-        assert_eq!(config.kind, "command");
+        assert_eq!(config.kind(), "command");
         assert_eq!(config.command.unwrap(), vec!["tool", "--json"]);
     }
 }
@@ -684,22 +699,78 @@ mod coverage_tests {
         let id = ProviderId::parse("jira").unwrap();
         let mut lower = ProviderConfig {
             id: id.clone(),
-            kind: "jira".into(),
+            kind: Some("jira".into()),
             base_url: Some("https://lower".into()),
             done_status_category: Some("done".into()),
             command: None,
         };
         lower.merge(ProviderConfig {
             id,
-            kind: "command".into(),
+            kind: Some("command".into()),
             base_url: None,
             done_status_category: None,
             command: Some(vec!["tool".into()]),
         });
-        assert_eq!(lower.kind, "command");
+        assert_eq!(lower.kind(), "command");
         assert_eq!(lower.base_url.as_deref(), Some("https://lower"));
         assert_eq!(lower.done_status_category.as_deref(), Some("done"));
         assert_eq!(lower.command.unwrap(), vec!["tool".to_string()]);
+    }
+
+    /// The reverse direction: the higher layer declares no `kind`, so the lower
+    /// layer's explicit kind must survive. Defaulting the absent kind to the
+    /// provider id here would silently turn a command provider into a no-op.
+    #[test]
+    fn a_higher_layer_that_omits_kind_keeps_the_lower_layers_kind() {
+        let id = ProviderId::parse("linear").unwrap();
+        let mut lower = ProviderConfig {
+            id: id.clone(),
+            kind: Some("command".into()),
+            base_url: None,
+            done_status_category: None,
+            command: Some(vec!["tool".into()]),
+        };
+        lower.merge(ProviderConfig {
+            id,
+            kind: None,
+            base_url: Some("https://higher".into()),
+            done_status_category: None,
+            command: None,
+        });
+        assert_eq!(lower.kind(), "command");
+        assert_eq!(lower.base_url.as_deref(), Some("https://higher"));
+        assert_eq!(lower.command.unwrap(), vec!["tool".to_string()]);
+    }
+
+    /// The same case end to end through `load`: a layout that narrows only the
+    /// base URL must not deactivate the global file's command provider.
+    #[test]
+    fn a_layout_that_sets_only_base_url_keeps_the_global_kind() {
+        let dir = tempfile::tempdir().unwrap();
+        let global = dir.path().join("global.toml");
+        std::fs::write(
+            &global,
+            "[convention.providers.linear]\nkind = \"command\"\ncommand = \"tool\"\n",
+        )
+        .unwrap();
+        let layout = dir.path().join("layout");
+        std::fs::create_dir_all(&layout).unwrap();
+        std::fs::write(
+            layout.join(LAYOUT_FILE),
+            "[convention.providers.linear]\nbase_url = \"https://layout\"\n",
+        )
+        .unwrap();
+
+        let _guard = EnvGuard::new(&global);
+        let loaded = load(&layout, None).unwrap();
+        let linear = loaded
+            .providers
+            .iter()
+            .find(|p| p.id.as_str() == "linear")
+            .expect("linear was declared");
+        assert_eq!(linear.kind(), "command");
+        assert_eq!(linear.base_url.as_deref(), Some("https://layout"));
+        assert_eq!(linear.command.as_deref(), Some(&["tool".to_string()][..]));
     }
 
     #[test]
@@ -835,7 +906,8 @@ mod coverage_tests {
         // A provider without a kind borrows its id.
         let bare: ProviderTable = toml::from_str("").unwrap();
         assert_eq!(
-            bare.into_config(ProviderId::parse("linear").unwrap()).kind,
+            bare.into_config(ProviderId::parse("linear").unwrap())
+                .kind(),
             "linear"
         );
     }

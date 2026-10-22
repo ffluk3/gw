@@ -2836,6 +2836,10 @@ fn no_color_strips_emoji_from_human_output() {
         "--stale-days",
         "0",
     ]);
+    // The converse: with the variable unset, the glyph is still printed and
+    // the run succeeds. Without this, an assertion that a variable *removes*
+    // the glyph is trivially true for a command that printed nothing at all.
+    assert_eq!(decorated.code, 0, "stderr: {}", decorated.stderr);
     assert!(decorated.stdout.contains('🔍'), "{}", decorated.stdout);
 
     let plain = fx.gw(&[
@@ -2853,7 +2857,42 @@ fn no_color_strips_emoji_from_human_output() {
     assert!(plain.stdout.contains("BRANCH"), "{}", plain.stdout);
     assert!(plain.stdout.contains("ACTION"), "{}", plain.stdout);
 
-    let env = gw_with_env(
+    // `NO_COLOR` follows no-color.org: any non-empty value disables, including
+    // `0`, and none of them may turn into a usage error. The exit-code check is
+    // what makes this test meaningful: before the fix, `NO_COLOR=1` exited 2
+    // with empty stdout, so the "no glyph" assertion passed vacuously.
+    for value in ["1", "0", "true", "yes"] {
+        let env = gw_with_env(
+            &fx.bare(),
+            &[
+                "clean",
+                "--dry-run",
+                "--skip-provider",
+                "github",
+                "--stale-days",
+                "0",
+            ],
+            &[("GW_REPO", fx.root.to_str().unwrap()), ("NO_COLOR", value)],
+        );
+        assert_eq!(
+            env.code, 0,
+            "NO_COLOR={value} caused a failure; stderr: {}",
+            env.stderr
+        );
+        assert!(
+            !env.stdout.contains('🔍'),
+            "NO_COLOR={value} was ignored: {}",
+            env.stdout
+        );
+        assert!(
+            env.stdout.contains("BRANCH"),
+            "NO_COLOR={value} suppressed the table content: {}",
+            env.stdout
+        );
+    }
+
+    // An empty value means "not set", per the same convention.
+    let empty = gw_with_env(
         &fx.bare(),
         &[
             "clean",
@@ -2863,12 +2902,13 @@ fn no_color_strips_emoji_from_human_output() {
             "--stale-days",
             "0",
         ],
-        &[("GW_REPO", fx.root.to_str().unwrap()), ("NO_COLOR", "1")],
+        &[("GW_REPO", fx.root.to_str().unwrap()), ("NO_COLOR", "")],
     );
+    assert_eq!(empty.code, 0, "stderr: {}", empty.stderr);
     assert!(
-        !env.stdout.contains('🔍'),
-        "NO_COLOR was ignored: {}",
-        env.stdout
+        empty.stdout.contains('🔍'),
+        "an empty NO_COLOR disabled decoration: {}",
+        empty.stdout
     );
 
     let add = fx.gw(&["add", "PROJ-85", "--no-fetch", "--no-color"]);

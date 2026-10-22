@@ -10,7 +10,7 @@ gw [GLOBAL OPTIONS] <COMMAND> [OPTIONS]
 | --- | --- | --- |
 | `--repo <PATH\|SLUG>` | `GW_REPO` | Layout root, `.bare` path, or `owner/name` resolved under the repos root. |
 | `--json` | — | Force machine-readable output. |
-| `--no-color` | `NO_COLOR` | Remove decorative emoji from human output. JSON and table content, including the `●` and `—` markers, are unchanged. |
+| `--no-color` | `NO_COLOR` | Remove decorative emoji from human output. JSON and table content, including the `●` and `—` markers, are unchanged. `NO_COLOR` disables when it is present and non-empty, whatever its value (including `0`); an empty value does not. No value of `NO_COLOR` causes a usage error. |
 | `--skip-provider <ID>` | `GW_SKIP_PROVIDERS` | Do not query this provider. Comma-separated, repeatable. |
 
 The argument parser provides `--help` and `--version`.
