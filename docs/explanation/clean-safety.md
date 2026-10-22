@@ -1,88 +1,90 @@
 # `gw clean` safety rules
 
-`gw clean` is the only command that destroys anything. Its rules are built
-around one principle: **fail closed**. A fact that could not be observed is
-never treated as a reason to remove.
+`gw clean` is the only command that destroys anything. Its rules have one
+principle: **fail closed**. A fact that `gw` could not observe is never a
+reason to remove.
 
 ## The order of checks
 
-For each worktree, `gw` finds the first applicable fact, in this order. Every
-fact that protects work comes before every reason to destroy it.
+For each worktree, `gw` finds the first applicable fact, in this order. Each
+fact that protects work comes before each reason to destroy work.
 
-1. **Harness worktree.** Owned by the agent harness. Skip.
-2. **No branch.** A detached `HEAD` is not managed. Skip.
-3. **Protected.** The default branch or the bare repository's `HEAD`. Keep.
-4. **Prunable.** Git says the directory is gone. Prune the metadata; there is
-   no checkout to lose.
+1. **Harness worktree.** The agent harness owns it. Skip.
+2. **No branch.** `gw` does not manage a detached `HEAD`. Skip.
+3. **Protected.** The default branch or the `HEAD` of the bare repository.
+   Keep.
+4. **Prunable.** Git reports that the directory is gone. Prune the metadata.
+   There is no checkout to lose.
 5. **Unreadable `HEAD`.** Keep.
-6. **Unpublished commits.** Some commit is reachable from no remote. Keep.
+6. **Unpublished commits.** Some commit is not reachable from a remote. Keep.
 7. **Uncommitted changes.** Keep. An unreadable status also counts here.
 8. **Merged PR.** Remove.
 9. **Stale.** The last commit is older than the stale limit. Remove.
-10. **Closed ticket.** Remove with `--closed`; otherwise recommend.
+10. **Closed ticket.** Remove with `--closed`. Without `--closed`,
+    recommend.
 11. **No signal.** Keep.
 
-When the closed-ticket fact applies but `--closed` was not given, `gw` prints
-a recommendation and removes nothing. A recommendation is not a deletion, so
-it does not need the restore payload.
+If the closed-ticket fact applies but you did not give `--closed`, `gw` prints
+a recommendation and removes nothing. A recommendation is not a deletion, so it
+does not need the restore data.
 
 ## Why unreadable is not clean
 
-`git status` can fail: a stale index lock, bad permissions, a broken worktree.
-Empty output from a failed command looks exactly like a clean tree if the
-state is a boolean. So cleanliness is a three-state value: `clean`, `dirty`,
-`unknown`. `unknown` is treated as dirty.
+`git status` can fail. A stale index lock, bad permissions, or a broken
+worktree can cause the failure. The empty output of a failed command looks
+exactly like a clean tree when the state is a boolean. Thus cleanliness has
+three states: `clean`, `dirty`, and `unknown`. `gw` treats `unknown` as dirty.
 
-The same applies to the last commit date. Activity with an unknown source is
-never stale, so a clock or read failure cannot age a worktree into removal.
+The same rule applies to the last commit date. Activity from an unknown source
+is never stale, so a clock error or a read error cannot make a worktree old
+enough for removal.
 
 ## What counts as published
 
 A commit is published when it is reachable from any remote ref, not only from
-`origin/<branch>`. `gw` builds that set once from `git rev-list --remotes`
-and does a binary search for each tip. A commit reachable from a different
-remote branch is still safe to keep.
+`origin/<branch>`. `gw` builds that set one time from `git rev-list --remotes`
+and does a binary search for each tip. A commit that is reachable from a
+different remote branch is still safe to keep.
 
-## Protected from removal vs. protected from deletion
+## Protected from removal compared to protected from deletion
 
-These are different sets on purpose:
+These are different sets, by design:
 
-- **Branch deletion** protects the default branch, the bare `HEAD`, and every
-  branch checked out in a worktree. Deleting a ref that a checkout uses would
-  strand it.
+- **Branch deletion** protects the default branch, the bare `HEAD`, and each
+  branch that a worktree checks out. A deleted ref that a checkout uses leaves
+  that checkout with no branch.
 - **Worktree removal** protects only the default branch and the bare `HEAD`.
 
-Conflating the two would make every worktree unremovable, because every
-worktree's branch is, by definition, checked out.
+If `gw` uses the same set for both operations, `gw` cannot remove a worktree,
+because each worktree checks out its own branch.
 
 ## Admission before confirmation
 
-Applying a plan requires an explicit opt-in:
+To apply a plan, you need an explicit opt-in:
 
 - `--dry-run` always plans only
-- otherwise `--yes` applies
-- otherwise `--json` plans only
-- otherwise the plan applies only when stdout is a terminal
+- otherwise, `--yes` applies
+- otherwise, `--json` plans only
+- otherwise, the plan applies only when stdout is a terminal
 
-A piped or scripted run therefore stays a dry run unless it says `--yes`. The
-default posture follows whether a human is present to watch.
+A piped run or a scripted run thus stays a dry run unless it gives `--yes`. The
+default follows whether a human is present to watch the run.
 
-`--json` counts as "no human present" even when stdout is a terminal. An agent
-harness may allocate a pty, and a terminal is not evidence that someone is
-watching. Asking for machine output is a request for a report, not a
-confirmation.
+`--json` counts as "no human present", even when stdout is a terminal. An agent
+harness can allocate a pty, and a terminal is not proof that someone watches.
+Machine output is a request for a report, not a confirmation.
 
 ## Refusal at execution time
 
-The executor does not re-derive any decision. It executes the plan. It still
-checks that each removal target is inside the managed worktrees directory
-before handing the path to git. A path that is somehow outside is refused and
-counted as a failure.
+The executor does not derive a decision again. It runs the plan. It still makes
+sure that each removal target is inside the managed worktrees directory before
+it gives the path to git. If a path is outside the directory, `gw` refuses the
+path and counts it as a failure.
 
 ## Restoring a deletion
 
-A delete decision carries the tip commit as a required field. The type cannot
-be constructed without the data needed to restore the branch, and the command
+A delete decision has the tip commit as a required field. `gw` cannot construct
+the type without the data that it needs to restore the branch. The command
 prints `git branch <name> <tip>` for each deletion.
 
-See [`gw clean` how-to](../how-to/clean-worktrees.md) for the commands.
+See the [`gw clean` how-to](../how-to/clean-worktrees.md) for the commands.

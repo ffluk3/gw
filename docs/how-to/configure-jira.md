@@ -12,17 +12,17 @@ Put the URL in `.gw.toml` at the layout root, beside `.bare`:
 base_url = "https://acme.atlassian.net"
 ```
 
-Or pass it for one command:
+Or pass the URL for one command:
 
 ```bash
 gw --jira-url https://acme.atlassian.net status
 ```
 
-The base URL must use `https://`. Plain HTTP is rejected.
+The base URL must use `https://`. `gw` rejects plain HTTP.
 
 ## Set credentials
 
-Credentials come from the environment only. They are never read from
+Credentials come from the environment only. `gw` never reads them from
 `.gw.toml`.
 
 ```bash
@@ -30,12 +30,12 @@ export GW_JIRA_USER=me@acme.com
 export GW_JIRA_API_TOKEN=...
 ```
 
-`JIRA_USER` and `JIRA_API_TOKEN` also work. The `GW_` names win when both are
-set.
+`JIRA_USER` and `JIRA_API_TOKEN` also work. If you set both names, the `GW_`
+names win.
 
-## Limit which branch prefixes are tickets
+## Limit the ticket prefixes
 
-Without configuration, any key shaped like `ABC-123` counts. To accept only
+Without configuration, each key shaped like `ABC-123` counts. To accept only
 your project:
 
 ```toml
@@ -43,21 +43,21 @@ your project:
 project = ["PROJ", "OPS"]
 ```
 
-Matching is case-insensitive. A branch such as `feature/PROJ-123-thing`
-matches. A key whose prefix is not in the list does not count.
+Matching ignores case. A branch such as `feature/PROJ-123-thing` matches. A key
+with a prefix that is not in the list does not count.
 
-## Confirm it works
+## Make sure that JIRA works
 
 ```bash
 gw status
 ```
 
 The `SUMMARY` column fills in. A failed lookup prints a warning and leaves the
-column empty. It does not fail the command.
+column empty. The lookup does not fail the command.
 
-## What `gw` asks JIRA for
+## The JIRA request
 
-One batched JQL request for all ticket keys in the layout, asking for
-`status`, `resolution`, and `summary`. A ticket in the `done` status category
-counts as closed. See the [configuration reference](../reference/configuration.md)
-for the full key list.
+`gw` sends one batched JQL request for all ticket keys in the layout. The
+request asks for `status`, `resolution`, and `summary`. A ticket in the `done`
+status category counts as closed. See the
+[configuration reference](../reference/configuration.md) for the full key list.

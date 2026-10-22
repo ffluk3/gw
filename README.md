@@ -2,8 +2,8 @@
 
 Manage git worktrees in a bare-repo layout.
 
-`gw` keeps one checkout for each branch, all backed by one bare repository.
-To change a branch, you change directory. You do not stash your work.
+`gw` keeps one checkout for each branch, and one bare repository backs them
+all. To change a branch, you change directory. You do not stash your work.
 
 ```text
 <root>/
@@ -16,14 +16,15 @@ To change a branch, you change directory. You do not stash your work.
 - `git` on your `PATH`.
 - A Rust toolchain at 1.87.0 or newer, **only if you build from source**.
 
-Optional, for optional features:
+You need these tools only for optional features:
 
 - `gh`, for the merged-pull-request check in `gw clean`
 - `curl`, for JIRA lookups
 
 ## Install
 
-Install the latest release. This needs `curl` and `tar`, not a Rust toolchain:
+Install the latest release. This method needs `curl` and `tar`, not a Rust
+toolchain:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ffluk3/gw/main/install.sh | bash
@@ -37,33 +38,33 @@ cd gw
 ./install.sh --from-source
 ```
 
-Either way `gw` lands in `~/.local/bin`. Then add the shell integration, which
-provides `gwadd` and makes `gw add --cd` change into the new worktree:
+Each method writes `gw` to `~/.local/bin`. Then add the shell integration,
+which provides `gwadd` and makes `gw add --cd` change into the new worktree:
 
 ```bash
 echo 'source ~/.local/share/gw/gw.sh' >> ~/.zshrc
 ```
 
-Start a new shell and check the install:
+Start a new shell and make sure that the install is correct:
 
 ```bash
 gw --version
 ```
 
-To pin a version, pass `--version v1.2.3`. To install somewhere else, pass
-`--dir DIR`.
+To pin a version, pass `--version v1.2.3`. To install to another directory,
+pass `--dir DIR`.
 
 ## Quick start
 
 ```bash
-# create a layout
+# make a layout
 gw init git@github.com:acme/widgets.git --dir ~/repos/acme/widgets
 
 # open a worktree and enter it
 cd ~/repos/acme/widgets/worktrees/main
 gwadd PROJ-1234
 
-# see every worktree
+# see each worktree
 gw status
 
 # preview cleanup, then apply it
@@ -73,7 +74,7 @@ gw clean --yes
 
 ## Documentation
 
-Full documentation lives in [`docs/`](docs/index.md) and is organized by the
+The full documentation is in [`docs/`](docs/index.md). It follows the
 [Diátaxis](https://diataxis.fr/) framework:
 
 | Goal | Start here |
@@ -101,9 +102,9 @@ cargo fmt --all -- --check
 ```
 
 Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
-A `commit-msg` hook rejects messages that do not, and CI checks every commit in
-a pull request. The format decides the next release version, which
-release-plz computes from the history. See
+A `commit-msg` hook rejects messages that do not, and CI checks each commit in
+a pull request. The message format sets the next release version, and
+release-plz computes that version from the history. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the rules and the release flow.
 
 The integration tests use real git repositories in a temporary directory. They

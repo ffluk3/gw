@@ -1,6 +1,6 @@
 # Manage many repositories under one root
 
-Use this guide when you keep several project layouts in one parent directory.
+Use this guide when you keep several layouts in one parent directory.
 
 ## Use the default root
 
@@ -23,17 +23,17 @@ Layouts live under `~/repos`, organized as `<owner>/<name>`:
 export GW_REPOS_ROOT=~/src/work
 ```
 
-A leading `~/` is expanded by `gw`, even when the variable comes from a program
-rather than a shell.
+`gw` expands a leading `~/`, even when the variable comes from a program and
+not from a shell.
 
-## List all layouts
+## List each layout
 
 ```bash
 gw repos
 ```
 
-Add `--dirty` to count worktrees with uncommitted changes. This runs one
-`git status` per worktree, so it is opt-in.
+Add `--dirty` to count worktrees with uncommitted changes. This option runs one
+`git status` for each worktree, so it is opt-in.
 
 ```bash
 gw repos --dirty
@@ -47,7 +47,7 @@ gw --repo widgets status        # bare name, if it is unique
 ```
 
 A bare name that matches more than one layout is an error, and the error lists
-the matches. Add the owner to disambiguate.
+the matches. Add the owner to select one layout.
 
 ## Select a repository with an environment variable
 
@@ -57,4 +57,4 @@ the matches. Add the owner to disambiguate.
 GW_REPO=acme/widgets gw status
 ```
 
-This is useful in a script that is not inside any layout.
+This form is useful in a script that is not inside a layout.

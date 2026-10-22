@@ -8,19 +8,19 @@
   worktrees/<branch>/  one checkout per branch
 ```
 
-Branch slashes become directory levels: `feature/x` lives at
+A slash in a branch name becomes a directory level. `feature/x` lives at
 `worktrees/feature/x`.
 
 ## The alternate worktrees directory
 
-An existing checkout may use `.bare.worktrees/` beside `worktrees/` instead.
-`gw` uses whichever directory already exists. It does not create a second
-directory beside the real one.
+An existing checkout can use `.bare.worktrees/` instead of `worktrees/`. `gw`
+uses the directory that already exists. It does not make a second directory
+beside the real one.
 
-When `gw` loads a layout, it also reads `git worktree list` and adopts the
-common parent of the linked worktrees if that differs from the convention.
-Only a directory that is a direct child of the layout root and that contains
-at least one linked worktree is accepted.
+When `gw` loads a layout, it also reads `git worktree list` and uses the common
+parent of the linked worktrees if that parent is different from the convention.
+`gw` accepts only a directory that is a direct child of the layout root and
+that contains at least one linked worktree.
 
 ## The repos root
 
@@ -32,13 +32,13 @@ at least one linked worktree is accepted.
       worktrees/
 ```
 
-Both nested (`owner/name`) and flat (`name`) layouts are discovered. The repos
-root is `GW_REPOS_ROOT`, or `~/repos` when unset.
+`gw` discovers both nested (`owner/name`) and flat (`name`) layouts. The repos
+root is `GW_REPOS_ROOT`, or `~/repos` when the variable is not set.
 
 ## How `gw` recognizes a layout
 
 A directory is a layout root when `<dir>/.bare/HEAD` is a file. Nothing else is
-required, and no marker file is written by `gw`.
+necessary, and `gw` does not write a marker file.
 
 ## Discovery from the current directory
 
@@ -49,11 +49,11 @@ required, and no marker file is written by `gw`.
 3. the layout root, `<root>/`
 4. a subdirectory of the layout root that git can resolve
 
-Anywhere else is an error. A normal clone, with a `.git` directory in the
+Each other location is an error. A normal clone, with a `.git` directory in the
 project, is also an error, because git's common directory is not `.bare`.
 
 ## Agent harness worktrees
 
-Paths containing `/.claude/worktrees/` are harness-owned. `gw clean` skips
-them and `gw repos` does not count them. `gw clean` also refuses to remove any
-path that is outside the managed worktrees directory.
+Paths that contain `/.claude/worktrees/` belong to the harness. `gw clean`
+skips them and `gw repos` does not count them. `gw clean` also refuses to
+remove a path that is outside the managed worktrees directory.

@@ -9,8 +9,8 @@ variables. Precedence is highest first:
 
 ## `.gw.toml`
 
-Place it at the layout root, beside `.bare`. It is outside every checkout, so
-it is local to the machine and not committed with the work.
+Put the file at the layout root, beside `.bare`. It is outside each checkout,
+so it is local to the machine and is not committed with the work.
 
 ```toml
 [jira]
@@ -21,56 +21,58 @@ base_url = "https://acme.atlassian.net"
 
 | Key | Type | Meaning |
 | --- | --- | --- |
-| `jira.project` | string or list of strings | Project prefixes a branch may reference. Empty or absent means any `[A-Z][A-Z0-9]+-[0-9]+` key. |
+| `jira.project` | string or list of strings | Project prefixes that a branch can reference. Empty or absent means any `[A-Z][A-Z0-9]+-[0-9]+` key. |
 | `jira.base_url` | string | JIRA base URL. Must be `https://`. |
 
-Unknown keys and syntax errors stop the command with exit code 2. Project keys
-are trimmed, deduplicated case-insensitively, and empty entries are dropped.
+Unknown keys and syntax errors stop the command with exit code 2. `gw` trims
+project keys, removes duplicates without regard to case, and drops empty
+entries.
 
-Credentials are never read from this file.
+`gw` never reads credentials from this file.
 
 ## Environment variables
 
-All variables are optional.
+Each variable is optional.
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `GW_REPO` | Layout root, `.bare` path, `owner/name`, or unique name. Same as `--repo`. | discovery from cwd |
-| `GW_CD` | Set to `1` to make a bare `gw add` change the shell's directory. Read by the shell integration, not the binary. | — |
-| `GW_REPOS_ROOT` | Directory that holds layouts. A leading `~/` is expanded. | `~/repos` |
+| `GW_REPO` | Layout root, `.bare` path, `owner/name`, or unique name. Same as `--repo`. | discovery from the current directory |
+| `GW_CD` | Set to `1` to make a bare `gw add` change the directory of the shell. The shell integration reads this variable, not the binary. | — |
+| `GW_REPOS_ROOT` | Directory that holds layouts. `gw` expands a leading `~/`. | `~/repos` |
 | `GW_STALE_DAYS` | Stale limit in days. | `7` |
-| `GW_PROTECT` | Comma-separated branch names that must never be deleted. | — |
+| `GW_PROTECT` | Comma-separated branch names that `gw` must never delete. | — |
 | `GW_JIRA_PROJECT` | Comma-separated project keys. Same as `--jira-project`. | — |
 | `GW_JIRA_BASE_URL` | JIRA base URL. Same as `--jira-url`. | — |
-| `GW_JIRA_USER` | JIRA user name. `JIRA_USER` is also read. | — |
-| `GW_JIRA_API_TOKEN` | JIRA API token. `JIRA_API_TOKEN` is also read. | — |
-| `GW_SKIP_GITHUB` | Any value skips the merged-PR lookup. Same as `--skip-github`. | — |
-| `NO_COLOR` | Any value disables color and emoji. Same as `--no-color`. | — |
+| `GW_JIRA_USER` | JIRA user name. `gw` also reads `JIRA_USER`. | — |
+| `GW_JIRA_API_TOKEN` | JIRA API token. `gw` also reads `JIRA_API_TOKEN`. | — |
+| `GW_SKIP_GITHUB` | Each value skips the merged-PR lookup. Same as `--skip-github`. | — |
+| `NO_COLOR` | Each value disables color and emoji. Same as `--no-color`. | — |
 
 ## Branch protection
 
 `gw clean` always protects:
 
-- the repository's default branch
-- the branch checked out by the bare repository's `HEAD`
-- every branch checked out in a worktree
+- the default branch of the repository
+- the branch that the `HEAD` of the bare repository checks out
+- each branch that a worktree checks out
 
-`GW_PROTECT` adds more. Protected branches are never deleted. Worktree removal
-is protected more narrowly: only the default branch and the bare `HEAD` are
-protected from removal, because otherwise no worktree could ever be removed.
+`GW_PROTECT` adds more branches. `gw` never deletes a protected branch.
+Worktree removal has narrower protection. Only the default branch and the bare
+`HEAD` are protected from removal, because otherwise `gw` could never remove a
+worktree.
 
 ## JIRA behavior
 
 When a base URL and both credentials are present, `gw` sends one batched JQL
-request for the ticket keys it found:
+request for the ticket keys that it found:
 
 ```text
 key in (PROJ-1,PROJ-2,...)
 ```
 
-It requests `status`, `resolution`, and `summary` for up to 100 issues. A
+It requests `status`, `resolution`, and `summary` for up to 100 tickets. A
 ticket in the `done` status category counts as closed. When no resolution name
 is set, the report uses `Resolved`.
 
-Credentials travel to `curl` through a mode-0600 config file, so they do not
+Credentials go to `curl` through a mode-0600 configuration file, so they do not
 appear in the process list.

@@ -1,18 +1,19 @@
 # Use `gw` in an agent workflow
 
-An agent that edits several tasks at once needs an isolated checkout for each
-one. `gw` is a good fit: one worktree per branch, no stashing, and a cleanup
-policy that refuses to destroy work it cannot prove is safe.
+An agent that edits several tasks at the same time needs a separate checkout
+for each task. `gw` is a good fit. It gives one worktree for each branch, it
+needs no stashing, and its cleanup policy does not destroy work that it cannot
+prove is safe.
 
-The repository ships an
+The repository includes an
 [Agent Skill](https://agentskills.io) at
 [`skills/gw/SKILL.md`](https://github.com/ffluk3/gw/blob/main/skills/gw/SKILL.md).
-Install it so the agent loads the workflow only when a task needs it.
+Install the skill so the agent loads the workflow only when a task needs it.
 
 ## Install the skill
 
-Choose one scope. The parent directory must stay named `gw`, because a skill's
-`name` must match its directory.
+Select one scope. The parent directory must stay named `gw`, because the `name`
+of a skill must match its directory.
 
 === "User, Claude Code"
 
@@ -37,7 +38,7 @@ Choose one scope. The parent directory must stay named `gw`, because a skill's
 
 === "Release install"
 
-    With no checkout, download the file from the repository:
+    If you have no checkout, download the file from the repository:
 
     ```bash
     mkdir -p ~/.claude/skills/gw
@@ -45,25 +46,27 @@ Choose one scope. The parent directory must stay named `gw`, because a skill's
       -o ~/.claude/skills/gw/SKILL.md
     ```
 
-Commit the project-scoped copy if the whole team should share it. Pin the
-download to a tag when the binary is pinned to a release.
+Commit the project-scoped copy if the team must share it. Pin the download to
+a tag when the binary is pinned to a release.
 
-## What the skill tells the agent
+## The skill instructions
 
-- Confirm the directory is inside a layout with `gw status --json`; do not
-  treat a normal clone as one.
-- Get a checkout with `gw add --print-path <branch>` and use the returned
-  absolute path. Do not use `gwadd` or `--cd`, because a `cd` in a child
-  process does not survive, and the shell function that performs it is not
-  available to a non-interactive tool call.
+The skill tells the agent to do these steps:
+
+- Make sure that the directory is inside a layout with `gw status --json`. Do
+  not treat a normal clone as a layout.
+- Get a checkout with `gw add --print-path <branch>` and use the absolute path
+  that it returns. Do not use `gwadd` or `--cd`. A `cd` in a child process does
+  not survive, and a non-interactive tool call cannot use the shell function
+  that performs the `cd`.
 - Read state from `gw status --json` and `gw repos --json`, never from tables.
-- Preview with `gw clean --dry-run --json`, and apply `--yes` only with human
+- Preview with `gw clean --dry-run --json`. Apply `--yes` only with human
   approval. A piped `gw clean` is a dry run by default, so an unattended agent
   cannot clean by accident.
 
 ## Manual equivalent
 
-An agent without the skill should still follow these three commands:
+An agent without the skill must still run these three commands:
 
 ```bash
 gw status --json
@@ -72,5 +75,5 @@ gw clean --dry-run --json
 ```
 
 See [Parse `gw` output in a script](script-with-json.md) for the stable JSON
-contract, and [`gw clean` safety rules](../explanation/clean-safety.md) for
-every condition that must hold before anything is removed.
+contract. See [`gw clean` safety rules](../explanation/clean-safety.md) for
+each condition that must be true before `gw` removes anything.

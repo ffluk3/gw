@@ -1,8 +1,8 @@
 # Read the status table
 
-Use this guide to understand what `gw status` shows.
+Use this guide to understand what `gw status` prints.
 
-## Run it
+## Run the command
 
 ```bash
 gw status
@@ -19,13 +19,13 @@ develop             1h ago
 | Column | Meaning |
 | --- | --- |
 | `BRANCH` | The branch checked out in the worktree. |
-| `LAST COMMIT` | Age of the newest commit in that worktree. `—` means `gw` could not read it. |
-| `DIRTY` | `●` means uncommitted changes. A blank cell means clean. |
+| `LAST COMMIT` | The age of the newest commit in that worktree. `—` means that `gw` could not read the age. |
+| `DIRTY` | `●` means uncommitted changes. An empty cell means clean. |
 | `STATE` | `harness`, `prunable`, or `closed`, when applicable. |
 | `SUMMARY` | The JIRA summary for the ticket key in the branch name. |
 
 `harness` marks a worktree that the agent harness owns. `gw` never touches
-those. `prunable` means git reports that the directory is gone.
+these worktrees. `prunable` means that git reports that the directory is gone.
 
 ## Skip the JIRA lookup
 
@@ -33,7 +33,7 @@ those. `prunable` means git reports that the directory is gone.
 gw status --no-jira
 ```
 
-Use this when JIRA is slow or not configured.
+Use this option when JIRA is slow or not configured.
 
 ## Get machine-readable output
 
@@ -44,9 +44,9 @@ gw status --json
 The JSON form is a stable contract. The table spacing is not. See
 [Parse `gw` output in a script](script-with-json.md).
 
-## Find out which repository you are in
+## Find the current repository
 
-The status table does not name the layout. To confirm it, use `gw repos`, which
-prints the root it scans, or pass `--repo <root>` explicitly. If discovery
-picks the wrong layout, `gw` will otherwise show you worktrees from a
-repository you did not intend.
+The status table does not give the name of the layout. To make sure that you
+use the correct layout, run `gw repos`, which prints the root that it scans, or
+pass `--repo <root>` explicitly. If discovery selects the wrong layout, `gw`
+prints worktrees from a repository that you did not select.

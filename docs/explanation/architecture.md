@@ -1,25 +1,27 @@
 # Architecture
 
-The workspace has two crates. The split exists so the policy that decides what
-gets destroyed can be tested without a repository.
+The workspace has two crates. The split exists so that you can test the policy
+that decides what gets destroyed without a repository.
 
 ## `crates/gw-core` — the policy
 
-Pure domain. No filesystem, no processes, no network, no environment. Every
-function is total over already-collected facts.
+Pure domain. There is no filesystem, no process, no network, and no
+environment. Each function is total over facts that the adapter layer already
+collected.
 
 | Module | Responsibility |
 | --- | --- |
 | `model` | Typed values: `BranchName`, `Sha`, `TicketKey`, and their validation |
-| `snapshot` | The facts a decision may see: `RepoSnapshot`, `Dirty`, `Activity`, `ReachableSet` |
+| `snapshot` | The facts that a decision can see: `RepoSnapshot`, `Dirty`, `Activity`, `ReachableSet` |
 | `classify` | The verdict functions and the clean plan |
 | `decision` | `Target`, `Decision`, `Reason`, `Plan`, `Counts` |
 | `policy` | The thresholds and opt-ins |
 | `layout` | The on-disk convention |
 | `render` | Table, human text, and JSON rendering |
 
-Because the environment is absent, nothing here reads a flag or a variable.
-Policy is constructed at the CLI boundary and passed by reference.
+Because the environment is absent, nothing in this crate reads a flag or a
+variable. `gw` constructs the policy at the CLI boundary and passes it by
+reference.
 
 ## `crates/gw` — the shell
 
@@ -30,37 +32,38 @@ and JIRA, and applies plans.
 | --- | --- |
 | `cli` | Argument parsing |
 | `config` | Layout discovery and root normalization |
-| `context` | Wires the layout, git handle, and settings once |
+| `context` | Wires the layout, git handle, and configuration one time |
 | `settings` | `.gw.toml` and precedence with flags |
 | `git` | Typed git operations behind `GitBackend` |
 | `github` | Batched `gh api graphql` merged-PR lookup |
 | `jira` | Batched JQL lookup over `curl` |
 | `repos` | Repos-root discovery and name resolution |
-| `commands` | One runner per subcommand |
+| `commands` | One runner for each subcommand |
 
 ## Why a typed git trait
 
-`GitBackend` is a trait with one method per operation, not a generic
-`run(args)`. Two things follow: a fake is trivial to write, and every failure
-mode has a name in the type system instead of being a string in a log.
+`GitBackend` is a trait with one method for each operation, not a generic
+`run(args)`. There are two results. A fake is easy to write, and each failure
+mode has a name in the type system instead of a string in a log.
 
 ## Why `curl` instead of an HTTP client
 
-The only network calls are one batched JQL post and the GitHub CLI. Using
-`curl` avoids linking a TLS stack into a tool that otherwise does not need one,
-and keeps the build dependency-light. It also matches what the previous shell
-implementation required.
+The only network calls are one batched JQL post and the GitHub CLI. `curl`
+does not link a TLS stack into a tool that does not need one, and it keeps the
+build dependency-light. It also matches what the previous shell implementation
+needed.
 
-Credentials go to `curl` through a mode-0600 config file rather than `-u`, so
-they never appear in the process list.
+Credentials go to `curl` through a mode-0600 configuration file rather than
+`-u`, so they never appear in the process list.
 
 ## Why the tests use real git
 
 The integration tests make real repositories in a temporary directory. The
-behavior that matters is git's behavior: what `worktree list` reports, what
-`rev-list --remotes` includes, how a fast-forward fails when a branch is
-checked out elsewhere. Mocks would encode assumptions about those answers,
-which is exactly what the tests need to check.
+behavior that matters is the behavior of git. That includes what
+`worktree list` reports, what `rev-list --remotes` contains, and how a
+fast-forward fails when another worktree checks out the branch. A mock encodes
+an assumption about those answers, and those answers are exactly what the
+tests must check.
 
 ## Command flow
 

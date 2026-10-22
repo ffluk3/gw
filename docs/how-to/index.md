@@ -1,8 +1,8 @@
 # How-to guides
 
-How-to guides solve one task each. They assume you have a working layout and
-know the basics. They do not teach concepts; follow the links to
-[explanation](../explanation/index.md) for that.
+Each how-to guide solves one task. The guides assume that you have a working
+layout and that you know the basics. They do not teach concepts. Follow the
+links to [explanation](../explanation/index.md) for the concepts.
 
 ## Layouts
 

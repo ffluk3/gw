@@ -10,16 +10,16 @@ gw repos --json
 gw clean --dry-run --json
 ```
 
-`--json` is a global flag. It works with every command.
+`--json` is a global flag. It works with each command.
 
-In JSON mode stdout carries exactly one JSON document. Progress lines,
-warnings, and restore hints go to stderr, so you never need to filter stdout
-before parsing it.
+In JSON mode, stdout carries exactly one JSON document. Progress lines,
+warnings, and restore hints go to stderr, so you never filter stdout before
+you parse it.
 
-`gw` also treats a non-terminal stdout as scripted for `gw clean`, which means
-`gw clean` stays a dry run there even without `--yes`. `--json` implies the
-same: a JSON run without `--yes` plans and changes nothing, even if stdout is a
-terminal.
+`gw` also treats a stdout that is not a terminal as scripted for `gw clean`.
+Thus `gw clean` stays a dry run there, even without `--yes`. `--json` has the
+same effect. A JSON run without `--yes` plans and changes nothing, even when
+stdout is a terminal.
 
 ## Know the stable contract
 
@@ -71,7 +71,7 @@ The JSON shape is the contract. Column widths, emoji, and colors are not.
 ```
 
 `--print-path` overrides `--json` and prints the bare path. `--cd` does the
-same, because the shell function that performs the `cd` consumes that output.
+same, because the shell function that changes the directory uses that output.
 
 ### `gw init --json`
 
@@ -115,10 +115,10 @@ same, because the shell function that performs the `cd` consumes that output.
 | 2 | You used a command or a flag incorrectly. |
 | 3 | Some destructive actions failed. |
 
-Check the exit code before you parse the body.
+Make sure that the exit code is correct before you parse the body.
 
-`applied` tells you whether the plan ran. Use it instead of inferring a dry
-run from the flags you passed.
+`applied` tells you if the plan ran. Use `applied` instead of the flags that
+you passed.
 
 ## Example
 
